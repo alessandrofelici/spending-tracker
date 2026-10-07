@@ -99,7 +99,7 @@ Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
 | Uncertainty | no reliable signal; asking it to rate its own confidence doesn't produce a calibrated number | a probability per category plus a confidence, which drive the 0.6 threshold |
 | Prompt injection via the description | can be steered into writing anything | can only choose among your categories |
 | Cost | input **and** output tokens | input tokens only |
-| Latency | time to first token plus generation time | one forward pass; about 0.5–1.4 s per request in the two probes above |
+| Latency | time to first token plus generation time | no generation step; p50 216 ms per request (see [Speed and cost](#speed-and-cost-jev-vs-a-chat-llm)) |
 
 **Where Jev falls short:**
 
@@ -107,7 +107,98 @@ Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
 - **The API is alpha**, so the request or response shape may change.
 - **It only sees the redacted description**, by design. Short or vague descriptions (`SQ *...`, LLC names) don't carry enough signal, and no model can fix that. Those end up in `spend review`.
 - **The question costs more than the answer.** The fixed ~600-token prompt dominates the cost. It's still a fraction of a cent per import, but trimming the descriptions makes every request cheaper.
-- **Today's data doesn't record any of this.** Confidence, timing and the reason a merchant fell back aren't stored, which is what step 2 adds.
+- **Older imports have no decision records.** Confidence, timing and the reason a merchant fell back are only stored (in `jev_decisions`) for imports made after step 2.
+
+## Accuracy: agreement with keyword rules
+
+`uv run python -m spending.jev_eval` (run 2026-10-07 on the real DB). Every merchant a keyword rule had already categorized was sent to Jev exactly as an import would send it, and Jev's answer was compared with the rule's. That's 59 merchants; payment rows are left out so they stay local. The rules serve as labels we already have, though they aren't always right themselves.
+
+| | Result |
+|---|---|
+| Jev agrees with the rule | **55 / 59 (93%)** |
+| Confident answers only (what an import keeps) | **53 / 55 (96%)** |
+| Status | ok 55, unsure 3, said_other 1, failed 0 |
+
+| Rule category | Agree / total |
+|---|--:|
+| Dining | 29 / 29 |
+| Shopping | 8 / 9 |
+| Subscriptions | 5 / 5 |
+| Gas & Transport | 5 / 5 |
+| Groceries | 4 / 4 |
+| Education | 1 / 3 |
+| Entertainment | 2 / 2 |
+| Travel | 0 / 1 |
+| Health | 1 / 1 |
+
+The four disagreements:
+
+| Merchant | Rule says | Jev says (confidence, status) | Who's right? |
+|---|---|---|---|
+| COSTCO GAS EAST LANSING | Shopping (`COSTCO`) | Gas & Transport (1.00, ok) | **Jev**: the rule is too broad |
+| MSU POLICE DEPT ONLINE | Education (`MSU `) | Other (0.64, said_other) | **Jev**: probably a parking ticket or fine, not education. It would go to review. |
+| MSU BIKES SERVICE CENTE | Education (`MSU `) | Gas & Transport (0.60, ok) | **Jev**: bike repair is transport |
+| AMTRAK COM WASHINGTON | Travel (`AMTRAK`) | Gas & Transport (0.50, unsure) | **Rule**, but Jev wasn't confident, so an import would send it to review rather than mislabel it |
+
+**Takeaway:** where Jev disagreed with the rules, it was usually catching a rule that's too broad (`COSTCO`, `MSU `). Its only real miss came back below the threshold, so the confidence check worked as designed. The `COSTCO GAS` and `MSU ` cases are worth fixing in `categories.toml`.
+
+## Speed and cost: Jev vs a chat LLM
+
+### Method
+
+**Jev is measured.** The eval above logged every request in `jev_decisions`. The numbers are wall-clock times from this machine, network included, with `WORKERS = 8`:
+
+- per request: **p50 216 ms, p95 446 ms, max 492 ms**
+- 59 merchants: **1.9 s** in total
+
+**The chat LLM is estimated** per merchant as:
+
+```
+time = TTFT + output_tokens / output_speed
+cost = input_tokens × input_price + output_tokens × output_price
+```
+
+| Input | Value | Where it comes from |
+|---|---|---|
+| input tokens | **246** | The same instructions, the 13 category descriptions and one description as a chat prompt, plus "reply with only JSON". Counted with `tiktoken` `o200k_base`; other models' tokenizers differ by roughly ±20%. Jev reports **623** for the same information, because its own request format adds overhead. |
+| output tokens | **8** (bare JSON) or **42** (JSON + one sentence of reasoning) | Counted the same way, on `{"category": "Gas & Transport"}` and on the same answer with a short `reasoning` field |
+| Fast non-reasoning model: Claude 4.5 Haiku | TTFT **0.59 s**, **90 tok/s** | [Artificial Analysis](https://artificialanalysis.ai/models/claude-4-5-haiku/providers), Anthropic endpoint, P50 over 72 h, checked 2026-10-07. Haiku 5.5 was released on 2026-10-07 and has no published benchmarks yet, so 4.5 stands in for it. |
+| Reasoning model: Gemini 3.8 Flash (high) | TTFT **24.33 s**, **129 tok/s** | [Artificial Analysis](https://artificialanalysis.ai/models/gemini-3-8-flash/providers), the only setting listed; TTFT includes thinking time. Checked 2026-10-07. |
+| Prices per 1M tokens (input / output) | Jev $0.042 / free · Haiku 5.5 $0.10 / $0.50 · Gemini 3.8 Flash $0.375 / $1.875 | OpenRouter `/api/v1/models/.../endpoints`, cheapest endpoint, 2026-10-07 |
+| Merchants per import | **96** on the first import; **1–19** per month after that (median ≈ 10) | The real DB: merchants not matched by a rule, by the month they first appeared |
+| Retries for unparseable or off-list replies | **ignored** | An assumption. At a few percent it would add only a few percent of one round. |
+
+**Caveats:**
+
+- Artificial Analysis measures TTFT with a 10,000-token prompt, while ours is 246 tokens. Real chat TTFT is therefore probably *lower* than in the table, so the chat estimates below are on the slow side.
+- Thinking tokens for the reasoning model are billed as output but not published per request, so its cost below is a floor.
+
+### Results
+
+At 8 requests in parallel, an import takes ⌈merchants / 8⌉ rounds of one request each.
+
+| Per merchant | Time | Cost |
+|---|--:|--:|
+| **Jev** (measured p50) | **0.22 s** | **$0.000026** (measured `usage.cost`) |
+| Haiku, bare JSON | 0.68 s | $0.000029 |
+| Haiku, JSON + reasoning | 1.06 s | $0.000046 |
+| Gemini 3.8 Flash (high) | 24.4 s | ≥ $0.000107 + thinking |
+
+| Per import | Jev | Haiku (JSON) | Haiku (+ reasoning) | Gemini Flash (high) |
+|---|--:|--:|--:|--:|
+| Typical month, ~10 merchants (2 rounds) | **~0.4 s** | ~1.4 s | ~2.1 s | ~49 s |
+| First import, 96 merchants (12 rounds) | **~2.6 s** (59 measured in 1.9 s) | ~8.2 s | ~12.7 s | ~4.9 min |
+
+### Is the difference noticeable?
+
+- **Compared with a reasoning model: yes.** Seconds instead of minutes on a first import, and close to a minute saved every month.
+- **Compared with a fast non-reasoning chat model: barely.** Jev is about 3× faster per request, but for a monthly import that's under a second against about a second and a half. Cost per merchant is about the same, a few thousandths of a cent.
+
+**So speed and cost aren't the strongest reasons to use Jev here. The output contract is:**
+
+- **Every answer is one of your categories.** A chat model needs a JSON-parsing step plus retry and validation code, and still occasionally invents a label.
+- **Each answer comes with a confidence.** That number decides what goes to `spend review`, and in the eval it caught the one real mistake (Amtrak, 0.50). A chat model has no comparable signal; asking it to rate its own confidence doesn't produce a calibrated number.
+- **The description can't steer the output.** The worst a malicious description can do is pick the wrong category from your list.
 
 ## Plan
 
