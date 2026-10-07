@@ -19,7 +19,7 @@ Safety measures:
 import os
 import re
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Set
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -155,7 +155,7 @@ def categorize(
     txns: Iterable,  # parser.Transaction
     memory: dict[str, str],
     use_llm: bool = True,
-    manual: set[str] = frozenset(),
+    manual: Set[str] = frozenset(),
 ) -> tuple[list[tuple[str, str]], dict[str, str]]:
     """Returns ([(category, source)] aligned with txns, {merchant: category} newly learned from the LLM).
     Order: your manual choices -> keyword rules -> remembered merchants -> LLM -> fallback."""
