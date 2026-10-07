@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import db
-from .classify import categorize, confident, load_config
+from .classify import FALLBACK, categorize, confident, load_config
 from .parser import parse_csv, transaction_ids
 
 
@@ -77,26 +77,56 @@ def cmd_review(args) -> None:
     if not merchants:
         print("Nothing to review.")
         return
+    review_merchants(conn, categories, merchants)
 
+
+def review_merchants(conn, categories: list[str], merchants: list) -> None:
+    """Ask for a category for each merchant row (merchant, d, n, s), offering
+    Jev's stored answer as the default when it's a real category."""
+    answers = db.get_answers(conn)
     for i, c in enumerate(categories, 1):
         print(f"  {i:>2}. {c}")
-    print("Enter a number to set the category, Enter to skip, q to quit.\n")
+    print(
+        "Number = set that category, Enter = accept the [suggestion] (or skip if"
+        " there is none), s = skip, q = quit.\n"
+    )
     for m in merchants:
         current = conn.execute(
             "SELECT category FROM transactions WHERE merchant = ? LIMIT 1",
             (m["merchant"],),
         ).fetchone()[0]
-        choice = input(
-            f"{m['d']}  ({m['n']}x, ${m['s']:.2f}, now: {current}) > "
-        ).strip()
+        suggestion, note = _suggest(answers.get(m["merchant"]), categories, current)
+        default = f" [{suggestion}]" if suggestion else ""
+        try:
+            choice = input(
+                f"{m['d']}  ({m['n']}x, ${m['s']:.2f}, now: {current}{note}){default} > "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C: same as q
+            print()
+            break
         if choice.lower() == "q":
             break
         if choice.isdigit() and 1 <= int(choice) <= len(categories):
-            n = db.set_merchant_category(
-                conn, m["merchant"], categories[int(choice) - 1]
-            )
-            conn.commit()
-            print(f"  -> {categories[int(choice) - 1]} ({n} transactions updated)")
+            picked = categories[int(choice) - 1]
+        elif choice == "" and suggestion:
+            picked = suggestion
+        else:
+            continue
+        n = db.set_merchant_category(conn, m["merchant"], picked)
+        conn.commit()
+        print(f"  -> {picked} ({n} transactions updated)")
+
+
+def _suggest(answer, categories: list[str], current: str) -> tuple[str | None, str]:
+    """(category to offer as the default, note for the prompt) from a jev_answers row."""
+    if answer is None:
+        return None, ""
+    if answer["outcome"] == "failed":
+        return None, ", Jev: no answer"
+    choice, pct = answer["choice"], f"{answer['confidence']:.0%}"
+    if choice not in categories or choice in (FALLBACK, current):
+        return None, f", Jev: {choice} {pct}"
+    return choice, f", Jev: {pct}"
 
 
 def cmd_set(args) -> None:
