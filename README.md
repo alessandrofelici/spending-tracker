@@ -213,5 +213,3 @@ Edit the category list, the `[descriptions]` Jev reads, or the rules in `categor
 | `N request(s) failed` | Network or API error. Those merchants become `Other`; re-run the import later (duplicates are skipped) or use `spend review`. |
 | Many merchants `below confidence` | Improve the category `[descriptions]` in `categories.toml`, or lower `JEV_MIN_CONFIDENCE` in `.env`. |
 | `spend set` says no merchant matches | Use part of the name as it appears in the dashboard's description column. |
-
-

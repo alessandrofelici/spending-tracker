@@ -7,4 +7,4 @@
 
 ## Specifications
 - Describe this to the user
-- When showing the differnece, create a feature branch to show visually how many transaction items were categorized by jev vs. by word matching, and how quick it would be against a chat-based LLM (using an estimate, and document how estimated) 
+- When showing the differnece, create a feature branch to show visually how many transaction items were categorized by jev vs. by word matching, and how quick it would be against a chat-based LLM (using an estimate, and document how estimated)
