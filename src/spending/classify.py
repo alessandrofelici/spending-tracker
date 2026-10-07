@@ -35,6 +35,7 @@ DEFAULT_MIN_CONFIDENCE = 0.6
 FALLBACK = "Other"
 WORKERS = 8
 
+
 def load_config(path: Path = CATEGORIES_PATH) -> tuple[list[str], dict[str, list[str]]]:
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
@@ -42,7 +43,9 @@ def load_config(path: Path = CATEGORIES_PATH) -> tuple[list[str], dict[str, list
     rules = {cat: [k.upper() for k in kws] for cat, kws in cfg.get("rules", {}).items()}
     unknown = set(rules) - set(categories)
     if unknown:
-        raise ValueError(f"Rules reference categories not in the list: {sorted(unknown)}")
+        raise ValueError(
+            f"Rules reference categories not in the list: {sorted(unknown)}"
+        )
     if FALLBACK not in categories:
         categories.append(FALLBACK)
     return categories, rules
@@ -72,7 +75,9 @@ INSTRUCTIONS = (
 )
 
 
-def classify_with_llm(descriptions: dict[str, str], categories: list[str]) -> dict[str, str]:
+def classify_with_llm(
+    descriptions: dict[str, str], categories: list[str]
+) -> dict[str, str]:
     """descriptions: merchant key -> example raw description. Returns merchant -> category
     for every merchant Jev answered validly and confidently; the rest are omitted."""
     load_dotenv(ROOT / ".env")
@@ -102,23 +107,39 @@ def classify_with_llm(descriptions: dict[str, str], categories: list[str]) -> di
         else:
             out[merchant] = category
     if failed:
-        print(f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'.")
+        print(
+            f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'."
+        )
     if unsure:
-        print(f"  {unsure} merchant(s) below confidence {min_confidence}; left as '{FALLBACK}' for review.")
+        print(
+            f"  {unsure} merchant(s) below confidence {min_confidence}; left as '{FALLBACK}' for review."
+        )
     return out
 
 
-def _decide(client: httpx.Client, api_key: str, model: str, desc: str, criteria: dict) -> tuple[str | None, float]:
+def _decide(
+    client: httpx.Client, api_key: str, model: str, desc: str, criteria: dict
+) -> tuple[str | None, float]:
     payload = {
         "model": model,
         "state": {"transaction_description": desc},
-        "questions": {"category": {"type": "choice", "instructions": INSTRUCTIONS, "criteria": criteria}},
+        "questions": {
+            "category": {
+                "type": "choice",
+                "instructions": INSTRUCTIONS,
+                "criteria": criteria,
+            }
+        },
         # Only zero-data-retention endpoints.
         "provider": {"zdr": True, "data_collection": "deny"},
     }
     for attempt in range(2):
         try:
-            resp = client.post(DECISIONS_URL, headers={"Authorization": f"Bearer {api_key}"}, json=payload)
+            resp = client.post(
+                DECISIONS_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
             resp.raise_for_status()
             answer = resp.json()["answers"]["category"]
             category, confidence = answer["choice"], float(answer.get("confidence", 0))
@@ -162,6 +183,10 @@ def categorize(
     final = []
     for t, r in zip(txns, results):
         if r is None:
-            r = (learned[t.merchant], "llm") if t.merchant in learned else (FALLBACK, "fallback")
+            r = (
+                (learned[t.merchant], "llm")
+                if t.merchant in learned
+                else (FALLBACK, "fallback")
+            )
         final.append(r)
     return final, learned

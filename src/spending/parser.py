@@ -60,7 +60,9 @@ def parse_csv(path: Path) -> list[Transaction]:
     with open(path, newline="", encoding="utf-8-sig") as f:
         lines = f.readlines()
     # The export starts with an account line (e.g. "0001234567 L50 CREDITLINE"); skip to the header.
-    start = next((i for i, line in enumerate(lines) if line.lstrip().startswith('"Date"')), None)
+    start = next(
+        (i for i, line in enumerate(lines) if line.lstrip().startswith('"Date"')), None
+    )
     if start is None:
         return []
     for row in csv.DictReader(lines[start:]):

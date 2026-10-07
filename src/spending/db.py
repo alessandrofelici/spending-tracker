@@ -7,7 +7,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT / ".env")  # before reading SPENDING_DB; real environment variables still win
+load_dotenv(
+    ROOT / ".env"
+)  # before reading SPENDING_DB; real environment variables still win
 DB_PATH = Path(os.environ.get("SPENDING_DB", ROOT / "data" / "spending.db"))
 
 SCHEMA = """
@@ -43,17 +45,27 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
 
 
 def get_memory(conn: sqlite3.Connection) -> dict[str, str]:
-    return {r["merchant"]: r["category"] for r in conn.execute("SELECT merchant, category FROM merchant_memory")}
+    return {
+        r["merchant"]: r["category"]
+        for r in conn.execute("SELECT merchant, category FROM merchant_memory")
+    }
 
 
 def get_manual_merchants(conn: sqlite3.Connection) -> set[str]:
-    return {r[0] for r in conn.execute("SELECT merchant FROM merchant_memory WHERE source = 'manual'")}
+    return {
+        r[0]
+        for r in conn.execute(
+            "SELECT merchant FROM merchant_memory WHERE source = 'manual'"
+        )
+    }
 
 
 def find_merchants(conn: sqlite3.Connection, text: str) -> list[str]:
     """Exact merchant key if it exists, otherwise every merchant containing `text`."""
     text = text.upper().strip()
-    if conn.execute("SELECT 1 FROM transactions WHERE merchant = ? LIMIT 1", (text,)).fetchone():
+    if conn.execute(
+        "SELECT 1 FROM transactions WHERE merchant = ? LIMIT 1", (text,)
+    ).fetchone():
         return [text]
     rows = conn.execute(
         "SELECT DISTINCT merchant FROM transactions WHERE merchant LIKE ? OR UPPER(description) LIKE ? ORDER BY merchant",
@@ -62,7 +74,9 @@ def find_merchants(conn: sqlite3.Connection, text: str) -> list[str]:
     return [r[0] for r in rows]
 
 
-def remember(conn: sqlite3.Connection, merchant: str, category: str, source: str) -> None:
+def remember(
+    conn: sqlite3.Connection, merchant: str, category: str, source: str
+) -> None:
     # Manual decisions are never overwritten by the LLM.
     conn.execute(
         """INSERT INTO merchant_memory (merchant, category, source) VALUES (?, ?, ?)
@@ -83,9 +97,12 @@ def insert_transactions(conn: sqlite3.Connection, rows: list[dict]) -> int:
     return conn.total_changes - before
 
 
-def set_merchant_category(conn: sqlite3.Connection, merchant: str, category: str) -> int:
+def set_merchant_category(
+    conn: sqlite3.Connection, merchant: str, category: str
+) -> int:
     remember(conn, merchant, category, "manual")
     cur = conn.execute(
-        "UPDATE transactions SET category = ?, source = 'manual' WHERE merchant = ?", (category, merchant)
+        "UPDATE transactions SET category = ?, source = 'manual' WHERE merchant = ?",
+        (category, merchant),
     )
     return cur.rowcount
