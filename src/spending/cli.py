@@ -111,9 +111,13 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
     stale = {
         m["merchant"]: m["d"]
         for m in merchants
-        if (a := answers.get(m["merchant"])) is None
-        or a["asked_with"] != key
-        or a["outcome"] == "failed"
+        # Without a new category only Other's answers are used.
+        if (new or m["fallback"])
+        and (
+            (a := answers.get(m["merchant"])) is None
+            or a["asked_with"] != key
+            or a["outcome"] == "failed"
+        )
     }
     if stale:
         print(
