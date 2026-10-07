@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 
 from .db import ROOT
 
-CATEGORIES_PATH = ROOT / "categories.toml"
+CATEGORIES_PATH = Path(os.environ.get("SPENDING_CATEGORIES", ROOT / "categories.toml"))
 DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 DEFAULT_MODEL = "typesafe/jev-1.13"
 DEFAULT_MIN_CONFIDENCE = 0.6
