@@ -8,6 +8,7 @@ from pathlib import Path
 from . import db
 from .classify import (
     FALLBACK,
+    add_category,
     categorize,
     classify_with_llm,
     confident,
@@ -163,7 +164,7 @@ def review_merchants(conn, categories: list[str], merchants: list) -> None:
         print(f"  {i:>2}. {c}")
     print(
         "Number = set that category, Enter = accept the [suggestion] (or skip if"
-        " there is none), s = skip, q = quit.\n"
+        " there is none), + = new category, s = skip, q = quit.\n"
     )
     for m in merchants:
         current = conn.execute(
@@ -172,14 +173,19 @@ def review_merchants(conn, categories: list[str], merchants: list) -> None:
         ).fetchone()[0]
         suggestion, note = _suggest(answers.get(m["merchant"]), categories, current)
         default = f" [{suggestion}]" if suggestion else ""
-        try:
-            choice = input(
-                f"{m['d']}  ({m['n']}x, ${m['s']:.2f}, now: {current}{note}){default} > "
-            ).strip()
-        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C: same as q
-            print()
-            break
-        if choice.lower() == "q":
+        prompt = (
+            f"{m['d']}  ({m['n']}x, ${m['s']:.2f}, now: {current}{note}){default} > "
+        )
+        while (choice := _ask(prompt)) is not None and choice.startswith("+"):
+            name = _new_category(choice[1:], categories)
+            if name:
+                n = db.set_merchant_category(conn, m["merchant"], name)
+                conn.commit()
+                print(f"  -> {name} ({n} transactions updated)\n")
+                # Earlier answers were picked without the new category.
+                resort(conn, load_config()[0], name)
+                return
+        if choice is None or choice.lower() == "q":
             break
         if choice.isdigit() and 1 <= int(choice) <= len(categories):
             picked = categories[int(choice) - 1]
@@ -190,6 +196,36 @@ def review_merchants(conn, categories: list[str], merchants: list) -> None:
         n = db.set_merchant_category(conn, m["merchant"], picked)
         conn.commit()
         print(f"  -> {picked} ({n} transactions updated)")
+
+
+def _ask(prompt: str) -> str | None:
+    """input(), stripped; None on Ctrl-D / Ctrl-C (treated like q)."""
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+
+def _new_category(name: str, categories: list[str]) -> str | None:
+    """Ask for a new category's name (unless given) and description, and add it
+    to categories.toml. None if cancelled."""
+    taken = {c.casefold() for c in categories}
+    name = name.strip()
+    while not name or name.casefold() in taken:
+        if name:
+            print(f"  '{name}' already exists; pick it by number instead.")
+        name = _ask("  New category name (Enter to cancel): ") or ""
+        if not name:
+            return None
+    description = _ask(
+        f"  What belongs in '{name}'? Jev reads this when choosing (optional): "
+    )
+    try:
+        return add_category(name, description or "")
+    except ValueError as e:
+        print(f"  {e}")
+        return None
 
 
 def _suggest(answer, categories: list[str], current: str) -> tuple[str | None, str]:
