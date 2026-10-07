@@ -33,8 +33,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `statements/` | ✅ | | **In use** | Drop MSUFCU CSV exports here. Holds `l50csvdl.csv` (Jan–Oct 2026). Git-ignored. |
 | `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard` |
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard` |
-| `categories.toml` | ✅ | ✅ | **In use** | Category list, descriptions Jev reads, keyword rules. Users tweak rules; devs change categories. |
-| `data/` | | | Generated | `spending.db` (SQLite) is created on first import. Empty right now. Git-ignored. |
+| `categories.toml` | ✅ | ✅ | **In use** | Category list, descriptions Jev reads, keyword rules. Users tweak rules and can add categories with `+` in `spend review`; devs change categories. |
+| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, and `jev_answers` (Jev's last answer per merchant, used for review suggestions). Empty right now. Git-ignored. |
 | `src/spending/` | | ✅ | **Active development** | All app code (~500 lines) |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
 | `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
@@ -44,6 +44,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `documents/` | | ✅ | **Planning** | Feature proposals, separate from the MVP (see [Planned features](#planned-features)) |
 | `documents/plaid-ideas.md` | | ✅ | Proposal | Automatic monthly pull via Plaid instead of manual CSV downloads. MSUFCU is supported (Plaid Exchange); free Trial plan covers it. |
 | `documents/checking-ideas.md` | | ✅ | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
+| `documents/extend-review.md` | | ✅ | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
 | `.venv/` | | | Generated | Created by `uv sync` |
 
 ## Layers
@@ -120,11 +121,13 @@ flowchart TD
     C -- yes --> R["category (rule)"]
     C -- no --> D{"Merchant seen<br/>before?"}
     D -- yes --> M["category (memory)"]
-    D -- no --> E["redact: mask tokens with 3+ digits"]
+    D -- no --> U{"Jev already unsure<br/>with these categories?"}
+    U -- yes --> O
+    U -- no --> E["redact: mask tokens with 3+ digits"]
     E --> F["Jev via OpenRouter<br/>choice question, one request per merchant"]
     F --> G{"Valid category and<br/>confidence ≥ 0.6?"}
     G -- yes --> L["category (llm)<br/>+ saved to merchant_memory"]
-    G -- no --> O["Other (fallback)<br/>→ spend review"]
+    G -- no --> O["Other (fallback)<br/>guess saved to jev_answers<br/>→ spend review"]
     MN & R & M & L & O --> H["db.py: INSERT OR IGNORE<br/>deduplicated by hash"]
     H --> I[("data/spending.db")]
     I --> J["spend summary / dashboard"]
