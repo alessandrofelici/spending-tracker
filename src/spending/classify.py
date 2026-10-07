@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 import httpx
+import tomlkit
 from dotenv import load_dotenv
+from tomlkit.items import KeyType, SingleKey, Table
 
 from .db import ROOT
 
@@ -52,6 +54,42 @@ def load_config(path: Path = CATEGORIES_PATH) -> tuple[list[str], dict[str, list
     if FALLBACK not in categories:
         categories.append(FALLBACK)
     return categories, rules
+
+
+def add_category(name: str, description: str = "", path: Path = CATEGORIES_PATH) -> str:
+    """Add a category to categories.toml just before "Other", keeping the file's
+    comments and layout. Returns the cleaned name; raises ValueError if it's unusable."""
+    name = " ".join(name.split())
+    if not name:
+        raise ValueError("The category name is empty.")
+    doc = tomlkit.parse(path.read_text(encoding="utf-8"))
+    categories = doc.get("categories")
+    if not isinstance(categories, list):
+        raise ValueError(f"{path.name} has no `categories = [...]` list.")
+    taken = {str(c).casefold(): str(c) for c in categories}
+    if name.casefold() in taken:
+        raise ValueError(f"'{taken[name.casefold()]}' already exists.")
+
+    at = categories.index(FALLBACK) if FALLBACK in categories else len(categories)
+    categories.insert(at, name)
+    if description := " ".join(description.split()):
+        if "descriptions" not in doc:
+            doc["descriptions"] = tomlkit.table()
+        table = doc["descriptions"]
+        if not isinstance(table, Table):
+            raise ValueError(f"`descriptions` in {path.name} isn't a table.")
+        key = SingleKey(name, t=KeyType.Basic)  # quoted, like the existing keys
+        body = table.value.body
+        other = next(
+            (i for i, (k, _) in enumerate(body) if k is not None and k.key == FALLBACK),
+            None,
+        )
+        if other is None:
+            table.add(key, description)
+        else:  # tomlkit has no public "insert before"; keeps "Other" last
+            table.value._insert_at(other, key, description)
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return name
 
 
 def match_rule(description: str, rules: dict[str, list[str]]) -> str | None:

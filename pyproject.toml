@@ -9,6 +9,7 @@ dependencies = [
     "pandas>=2.2",
     "plotly>=5.22",
     "streamlit>=1.38",
+    "tomlkit>=0.15.1",
 ]
 
 [project.scripts]
