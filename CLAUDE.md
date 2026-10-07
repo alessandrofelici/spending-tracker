@@ -9,7 +9,7 @@ You are **authorized to commit without asking**, within these rules. Anything ou
 ### When to commit
 
 - **One commit per logical change**: commit as soon as a self-contained change is done and verified (a bug fix, one step of a feature, a doc update). Don't batch a whole task into one commit, and don't mix unrelated changes in one commit.
-- **Verify first.** Before committing code, at minimum run `uv run python -m py_compile src/spending/*.py`, plus whatever check proves the change works (e.g. a `--dry-run --no-llm` import against sample data). Never commit something you know is broken; say so instead.
+- **Verify first.** Before committing code, at minimum run `uv run pre-commit run --all-files` (Ruff, ty and the bank-data/secret guards; the same hooks run on `git commit`), plus whatever check proves the change works (e.g. a `--dry-run --no-llm` import against sample data). Never commit something you know is broken; say so instead.
 - **Only commit your own changes.** If the working tree already had uncommitted edits from the developer when you started, leave them unstaged. Stage files explicitly (`git add <path>`), not `git add -A` / `git add .`.
 
 ### Where

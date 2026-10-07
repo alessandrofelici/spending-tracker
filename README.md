@@ -213,3 +213,15 @@ Edit the category list, the `[descriptions]` Jev reads, or the rules in `categor
 | `N request(s) failed` | Network or API error. Those merchants become `Other`; re-run the import later (duplicates are skipped) or use `spend review`. |
 | Many merchants `below confidence` | Improve the category `[descriptions]` in `categories.toml`, or lower `JEV_MIN_CONFIDENCE` in `.env`. |
 | `spend set` says no merchant matches | Use part of the name as it appears in the dashboard's description column. |
+
+## Development
+
+Commits are checked by [pre-commit](https://pre-commit.com) hooks: Ruff (lint + format), ty (type checking), whitespace fixes, and guards that block bank data, databases, `.env` and API keys. The tools are dev dependencies, so their versions are pinned in `uv.lock`.
+
+```bash
+uv sync                             # installs the dev tools too
+uv run pre-commit install           # once per clone; covers all git worktrees
+uv run pre-commit run --all-files   # check everything by hand
+```
+
+If a hook fixes files (Ruff, whitespace), the commit stops. Review the changes, `git add` them and commit again. In VS Code, the [ty extension](https://marketplace.visualstudio.com/items?itemName=astral-sh.ty) shows the same type errors the hook checks for.

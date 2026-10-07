@@ -36,7 +36,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `categories.toml` | ✅ | ✅ | **In use** | Category list, descriptions Jev reads, keyword rules. Users tweak rules; devs change categories. |
 | `data/` | | | Generated | `spending.db` (SQLite) is created on first import. Empty right now. Git-ignored. |
 | `src/spending/` | | ✅ | **Active development** | All app code (~500 lines) |
-| `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point |
+| `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
+| `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
 | `.env` | | ✅ | Secret | `OPENROUTER_KEY`. Git-ignored. |
 | `README.md` | ✅ | ✅ | Docs | Usage and how categorization works |
 | `STRUCTURE.md` | | ✅ | Docs | This file |
