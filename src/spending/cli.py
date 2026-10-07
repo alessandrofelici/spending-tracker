@@ -35,7 +35,9 @@ def cmd_import(args) -> None:
                 "source": src,
                 "statement": path.name,
             }
-            for tid, t, (cat, src) in zip(transaction_ids(txns), txns, results)
+            for tid, t, (cat, src) in zip(
+                transaction_ids(txns), txns, results, strict=True
+            )
         ]
 
         if args.dry_run:

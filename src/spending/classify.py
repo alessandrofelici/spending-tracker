@@ -133,7 +133,7 @@ def _decide(
         # Only zero-data-retention endpoints.
         "provider": {"zdr": True, "data_collection": "deny"},
     }
-    for attempt in range(2):
+    for _attempt in range(2):
         try:
             resp = client.post(
                 DECISIONS_URL,
@@ -181,7 +181,7 @@ def categorize(
         learned = classify_with_llm(pending, categories)
 
     final = []
-    for t, r in zip(txns, results):
+    for t, r in zip(txns, results, strict=True):
         if r is None:
             r = (
                 (learned[t.merchant], "llm")

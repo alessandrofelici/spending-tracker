@@ -82,7 +82,9 @@ with left:
     fig.update_traces(
         marker_color=PALETTE[0], hovertemplate="%{y}: $%{x:,.2f}<extra></extra>"
     )
-    fig.update_layout(height=420, margin=dict(l=0, r=10, t=10, b=0), bargap=0.35)
+    fig.update_layout(
+        height=420, margin={"l": 0, "r": 10, "t": 10, "b": 0}, bargap=0.35
+    )
     st.plotly_chart(fig, width="stretch")
 
 with right:
@@ -100,7 +102,7 @@ with right:
     fig.update_traces(hovertemplate="%{fullData.name}: $%{y:,.2f}<extra></extra>")
     fig.update_layout(
         height=420,
-        margin=dict(l=0, r=10, t=10, b=0),
+        margin={"l": 0, "r": 10, "t": 10, "b": 0},
         xaxis_type="category",
         hovermode="x unified",
     )
