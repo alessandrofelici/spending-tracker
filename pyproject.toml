@@ -24,6 +24,7 @@ packages = ["src/spending"]
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.2",
+    "pre-commit-hooks>=6.0.0",
     "ruff>=0.16.10",
     "ty>=0.0.85",
 ]

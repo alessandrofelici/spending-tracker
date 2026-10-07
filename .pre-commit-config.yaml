@@ -1,0 +1,78 @@
+# Git pre-commit hooks. Setup (once per clone; covers all worktrees):
+#   uv sync && uv run pre-commit install
+# Run on everything: uv run pre-commit run --all-files
+#
+# All hooks are local and run through `uv run`, so tool versions come from
+# uv.lock (the dev dependency group), the same ones the editor uses.
+
+default_install_hook_types: [pre-commit]
+
+repos:
+  # Keep personal financial data and secrets out of git, even with `git add -f`.
+  - repo: local
+    hooks:
+      - id: no-bank-data
+        name: block bank data, databases and .env
+        language: fail
+        entry: "Never commit bank data, databases or .env (see CLAUDE.md):"
+        files: '(^|/)\.env$|\.(csv|pdf|db)$|^(statements|data)/'
+      - id: no-openrouter-key
+        name: block OpenRouter API keys
+        language: pygrep
+        entry: 'sk-or-v1-[0-9a-f]{32,}'
+
+  - repo: local
+    hooks:
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+        language: system
+        entry: uv run trailing-whitespace-fixer
+        types: [text]
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file
+        name: fix end of files
+        language: system
+        entry: uv run end-of-file-fixer
+        types: [text]
+      - id: check-toml
+        name: check toml
+        language: system
+        entry: uv run check-toml
+        types: [toml]
+      - id: check-yaml
+        name: check yaml
+        language: system
+        entry: uv run check-yaml
+        types: [yaml]
+      - id: check-merge-conflict
+        name: check for merge conflict markers
+        language: system
+        entry: uv run check-merge-conflict
+        types: [text]
+      - id: check-added-large-files
+        name: check for large files
+        language: system
+        entry: uv run check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        language: system
+        entry: uv run ruff check --fix
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        language: system
+        entry: uv run ruff format
+        types_or: [python, pyi]
+        require_serial: true
+      # Type errors cross files, so ty checks the whole project, not just
+      # the staged files.
+      - id: ty
+        name: ty check
+        language: system
+        entry: uv run ty check
+        types_or: [python, pyi]
+        pass_filenames: false
