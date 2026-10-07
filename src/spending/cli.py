@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import db
-from .classify import categorize, load_config
+from .classify import categorize, confident, load_config
 from .parser import parse_csv, transaction_ids
 
 
@@ -20,8 +20,12 @@ def cmd_import(args) -> None:
             print("  No transactions found. Is this an MSUFCU transactions CSV?")
             continue
 
-        results, learned = categorize(
-            txns, memory, use_llm=not args.no_llm, manual=db.get_manual_merchants(conn)
+        results, answers = categorize(
+            txns,
+            memory,
+            use_llm=not args.no_llm,
+            manual=db.get_manual_merchants(conn),
+            unplaced=db.get_unplaced(conn),
         )
         rows = [
             {
@@ -47,9 +51,11 @@ def cmd_import(args) -> None:
                 )
             continue
 
+        learned = confident(answers)
         for merchant, cat in learned.items():
             db.remember(conn, merchant, cat, "llm")
         memory.update(learned)
+        db.save_answers(conn, answers)
         added = db.insert_transactions(conn, rows)
         conn.commit()
         months = sorted({r["month"] for r in rows})

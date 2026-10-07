@@ -2,9 +2,14 @@
 
 import os
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:  # classify imports db, so only for type hints
+    from .classify import Answer
 
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(
@@ -33,6 +38,16 @@ CREATE TABLE IF NOT EXISTS merchant_memory (
     category TEXT NOT NULL,
     source   TEXT NOT NULL
 );
+
+-- Jev's latest answer per merchant, including ones too unsure to use, so
+-- `spend review` can suggest them and unplaced merchants aren't re-asked.
+CREATE TABLE IF NOT EXISTS jev_answers (
+    merchant   TEXT PRIMARY KEY,
+    choice     TEXT,            -- Jev's top pick; NULL if the request failed
+    confidence REAL NOT NULL,
+    outcome    TEXT NOT NULL,   -- confident | unsure | chose_other | failed
+    asked_with TEXT NOT NULL    -- hash of the categories + descriptions it chose from
+);
 """
 
 
@@ -58,6 +73,26 @@ def get_manual_merchants(conn: sqlite3.Connection) -> set[str]:
             "SELECT merchant FROM merchant_memory WHERE source = 'manual'"
         )
     }
+
+
+def get_unplaced(conn: sqlite3.Connection) -> dict[str, str]:
+    """Merchants Jev answered but couldn't place -> the criteria they were asked with."""
+    rows = conn.execute(
+        "SELECT merchant, asked_with FROM jev_answers"
+        " WHERE outcome IN ('unsure', 'chose_other')"
+    )
+    return {r["merchant"]: r["asked_with"] for r in rows}
+
+
+def get_answers(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    return {r["merchant"]: r for r in conn.execute("SELECT * FROM jev_answers")}
+
+
+def save_answers(conn: sqlite3.Connection, answers: Mapping[str, "Answer"]) -> None:
+    conn.executemany(
+        "INSERT OR REPLACE INTO jev_answers VALUES (?, ?, ?, ?, ?)",
+        [(m, *a) for m, a in answers.items()],
+    )
 
 
 def find_merchants(conn: sqlite3.Connection, text: str) -> list[str]:

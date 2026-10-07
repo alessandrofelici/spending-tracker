@@ -16,12 +16,15 @@ Safety measures:
   * Requests are restricted to zero-data-retention endpoints (provider.zdr).
 """
 
+import hashlib
+import json
 import os
 import re
 import tomllib
-from collections.abc import Iterable, Set
+from collections.abc import Iterable, Mapping, Set
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx
 from dotenv import load_dotenv
@@ -75,11 +78,42 @@ INSTRUCTIONS = (
 )
 
 
+class Answer(NamedTuple):
+    """What Jev said about one merchant, kept even when it isn't used."""
+
+    choice: str | None  # None when the request failed
+    confidence: float
+    outcome: str  # confident | unsure | chose_other | failed
+    asked_with: str  # criteria_key() of the category list it chose from
+
+
+def confident(answers: Mapping[str, Answer]) -> dict[str, str]:
+    """merchant -> category for the answers good enough to use."""
+    return {
+        m: a.choice
+        for m, a in answers.items()
+        if a.outcome == "confident" and a.choice is not None
+    }
+
+
+def load_criteria(categories: list[str]) -> dict[str, str | None]:
+    """Category -> description, exactly as Jev sees it."""
+    explained = load_descriptions()
+    return {c: explained.get(c) for c in categories}
+
+
+def criteria_key(criteria: Mapping[str, str | None]) -> str:
+    """Changes whenever a category or its description changes, so an old
+    'unsure' answer is only trusted while Jev would see the same choices."""
+    blob = json.dumps(criteria, sort_keys=True).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
 def classify_with_llm(
     descriptions: dict[str, str], categories: list[str]
-) -> dict[str, str]:
-    """descriptions: merchant key -> example raw description. Returns merchant -> category
-    for every merchant Jev answered validly and confidently; the rest are omitted."""
+) -> dict[str, Answer]:
+    """descriptions: merchant key -> example raw description. Returns an Answer for
+    every merchant; only outcome == "confident" ones should be used as a category."""
     load_dotenv(ROOT / ".env")
     api_key = os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
@@ -87,8 +121,8 @@ def classify_with_llm(
     model = os.environ.get("JEV_MODEL", DEFAULT_MODEL)
     min_confidence = float(os.environ.get("JEV_MIN_CONFIDENCE", DEFAULT_MIN_CONFIDENCE))
 
-    explained = load_descriptions()
-    criteria = {c: explained.get(c) for c in categories}
+    criteria = load_criteria(categories)
+    key = criteria_key(criteria)
 
     def ask(item: tuple[str, str]) -> tuple[str, str | None, float]:
         merchant, desc = item
@@ -97,15 +131,21 @@ def classify_with_llm(
     with httpx.Client(timeout=60) as client, ThreadPoolExecutor(WORKERS) as pool:
         answers = list(pool.map(ask, descriptions.items()))
 
-    out: dict[str, str] = {}
+    out: dict[str, Answer] = {}
     failed = unsure = 0
     for merchant, category, confidence in answers:
         if category is None:
             failed += 1
-        elif category == FALLBACK or confidence < min_confidence:
+            outcome = "failed"
+        elif category == FALLBACK:
             unsure += 1
+            outcome = "chose_other"
+        elif confidence < min_confidence:
+            unsure += 1
+            outcome = "unsure"
         else:
-            out[merchant] = category
+            outcome = "confident"
+        out[merchant] = Answer(category, confidence, outcome, key)
     if failed:
         print(
             f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'."
@@ -156,10 +196,16 @@ def categorize(
     memory: dict[str, str],
     use_llm: bool = True,
     manual: Set[str] = frozenset(),
-) -> tuple[list[tuple[str, str]], dict[str, str]]:
-    """Returns ([(category, source)] aligned with txns, {merchant: category} newly learned from the LLM).
-    Order: your manual choices -> keyword rules -> remembered merchants -> LLM -> fallback."""
+    unplaced: Mapping[str, str] | None = None,
+) -> tuple[list[tuple[str, str]], dict[str, Answer]]:
+    """Returns ([(category, source)] aligned with txns, {merchant: Answer} from Jev this run).
+    Order: your manual choices -> keyword rules -> remembered merchants -> LLM -> fallback.
+
+    unplaced: merchant -> criteria_key for merchants Jev already couldn't place.
+    They aren't asked again until the categories or their descriptions change."""
     categories, rules = load_config()
+    key = criteria_key(load_criteria(categories))
+    unplaced = unplaced or {}
     txns = list(txns)
     results: list[tuple[str, str] | None] = []
     pending: dict[str, str] = {}
@@ -173,20 +219,19 @@ def categorize(
             results.append((cat, "memory"))
         else:
             results.append(None)
-            pending.setdefault(t.merchant, t.description)
+            if unplaced.get(t.merchant) != key:
+                pending.setdefault(t.merchant, t.description)
 
-    learned: dict[str, str] = {}
+    answers: dict[str, Answer] = {}
     if pending and use_llm:
         print(f"  Asking Jev about {len(pending)} new merchant(s)...")
-        learned = classify_with_llm(pending, categories)
+        answers = classify_with_llm(pending, categories)
+    learned = confident(answers)
 
     final = []
     for t, r in zip(txns, results, strict=True):
         if r is None:
-            r = (
-                (learned[t.merchant], "llm")
-                if t.merchant in learned
-                else (FALLBACK, "fallback")
-            )
+            cat = learned.get(t.merchant)
+            r = (cat, "llm") if cat else (FALLBACK, "fallback")
         final.append(r)
-    return final, learned
+    return final, answers
