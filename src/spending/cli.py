@@ -6,7 +6,15 @@ import sys
 from pathlib import Path
 
 from . import db
-from .classify import FALLBACK, categorize, confident, load_config
+from .classify import (
+    FALLBACK,
+    categorize,
+    classify_with_llm,
+    confident,
+    criteria_key,
+    load_config,
+    load_criteria,
+)
 from .parser import parse_csv, transaction_ids
 
 
@@ -70,6 +78,12 @@ def cmd_import(args) -> None:
 def cmd_review(args) -> None:
     conn = db.connect()
     categories, _ = load_config()
+    if args.resort is not None:
+        new = args.resort or None
+        if new is not None and new not in categories:
+            sys.exit(f"Unknown category. Choose from: {', '.join(categories)}")
+        resort(conn, categories, new)
+        return
     sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source = 'fallback'"
     if args.all:
         sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source != 'manual'"
@@ -78,6 +92,67 @@ def cmd_review(args) -> None:
         print("Nothing to review.")
         return
     review_merchants(conn, categories, merchants)
+
+
+def resort(conn, categories: list[str], new: str | None = None) -> None:
+    """Ask Jev again now that the categories changed. Confident answers for
+    uncategorized merchants are applied; moves into `new` from anywhere else
+    (including your own choices) are proposed for you to confirm. Merchants a
+    keyword rule matched are never sent."""
+    merchants = conn.execute(
+        """SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s,
+                  MIN(category) category, MIN(source = 'fallback') fallback
+           FROM transactions GROUP BY merchant
+           HAVING MAX(source = 'rule') = 0 ORDER BY s DESC"""
+    ).fetchall()
+    key = criteria_key(load_criteria(categories))
+    answers = db.get_answers(conn)
+    stale = {
+        m["merchant"]: m["d"]
+        for m in merchants
+        if (a := answers.get(m["merchant"])) is None
+        or a["asked_with"] != key
+        or a["outcome"] == "failed"
+    }
+    if stale:
+        print(
+            f"Asking Jev about {len(stale)} merchant(s) with the current categories..."
+        )
+        try:
+            db.save_answers(conn, classify_with_llm(stale, categories))
+        except RuntimeError as e:
+            sys.exit(str(e))
+        conn.commit()
+        answers = db.get_answers(conn)
+
+    moved, to_confirm, left = [], [], []
+    for m in merchants:
+        a = answers.get(m["merchant"])
+        sure = a is not None and a["outcome"] == "confident" and a["asked_with"] == key
+        if m["fallback"]:
+            if sure:
+                db.place_fallback(conn, m["merchant"], a["choice"])
+                moved.append(f"  {m['d']} -> {a['choice']}")
+            else:
+                left.append(m)
+        elif sure and new and a["choice"] == new and m["category"] != new:
+            to_confirm.append(m)
+    conn.commit()
+
+    if moved:
+        print(f"Jev placed {len(moved)} merchant(s) that were '{FALLBACK}':")
+        print("\n".join(moved))
+    if to_confirm:
+        print(
+            f"\nJev thinks {len(to_confirm)} merchant(s) belong in '{new}'; Enter accepts each move."
+        )
+    if left:
+        print(f"{len(left)} merchant(s) still need a category.")
+    if to_confirm or left:
+        print()
+        review_merchants(conn, categories, to_confirm + left)
+    elif not moved:
+        print("Nothing to re-sort.")
 
 
 def review_merchants(conn, categories: list[str], merchants: list) -> None:
@@ -201,6 +276,14 @@ def main() -> None:
         "--all",
         action="store_true",
         help="Review every non-manual merchant, not just uncategorized",
+    )
+    s.add_argument(
+        "--resort",
+        nargs="?",
+        const="",
+        metavar="CATEGORY",
+        help="Ask Jev again with the current categories: places what it can of 'Other'"
+        " automatically, and proposes moves into CATEGORY (e.g. one you just added)",
     )
     s.set_defaults(func=cmd_review)
 
