@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git switch -c *)"
+    ],
+    "ask": [
+      "Bash(git commit --amend*)",
+      "Bash(git rebase*)",
+      "Bash(git reset --hard*)",
+      "Bash(git switch main*)",
+      "Bash(git checkout main*)"
+    ],
+    "deny": [
+      "Bash(git push*)"
+    ]
+  },
+  "attribution": {
+    "commit": ""
+  },
+  "worktree": {
+    "baseRef": "head"
+  }
+}
