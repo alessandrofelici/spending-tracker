@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS merchant_memory (
     category TEXT NOT NULL,
     source   TEXT NOT NULL
 );
+
+-- Every answer Jev gave (or failed to give), kept for the dashboard and the eval.
+-- Separate from merchant_memory so unsure or failed merchants still go to review.
+CREATE TABLE IF NOT EXISTS jev_decisions (
+    merchant    TEXT NOT NULL,
+    choice      TEXT,               -- NULL when the request failed
+    confidence  REAL,
+    status      TEXT NOT NULL,      -- ok | unsure | said_other | failed
+    latency_ms  REAL NOT NULL,      -- one request, including its retry
+    model       TEXT,               -- dated model version Jev reported
+    run         TEXT NOT NULL,      -- import | eval
+    decided_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -95,6 +108,15 @@ def insert_transactions(conn: sqlite3.Connection, rows: list[dict]) -> int:
         rows,
     )
     return conn.total_changes - before
+
+
+def record_decisions(conn: sqlite3.Connection, rows: list[dict], run: str) -> None:
+    conn.executemany(
+        """INSERT INTO jev_decisions
+           (merchant, choice, confidence, status, latency_ms, model, run)
+           VALUES (:merchant, :choice, :confidence, :status, :latency_ms, :model, :run)""",
+        [r | {"run": run} for r in rows],
+    )
 
 
 def set_merchant_category(

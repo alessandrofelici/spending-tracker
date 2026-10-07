@@ -20,7 +20,7 @@ def cmd_import(args) -> None:
             print("  No transactions found. Is this an MSUFCU transactions CSV?")
             continue
 
-        results, learned = categorize(
+        results, learned, decisions = categorize(
             txns, memory, use_llm=not args.no_llm, manual=db.get_manual_merchants(conn)
         )
         rows = [
@@ -50,6 +50,7 @@ def cmd_import(args) -> None:
         for merchant, cat in learned.items():
             db.remember(conn, merchant, cat, "llm")
         memory.update(learned)
+        db.record_decisions(conn, [d._asdict() for d in decisions], run="import")
         added = db.insert_transactions(conn, rows)
         conn.commit()
         months = sorted({r["month"] for r in rows})

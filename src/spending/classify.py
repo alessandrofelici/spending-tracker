@@ -18,10 +18,12 @@ Safety measures:
 
 import os
 import re
+import time
 import tomllib
 from collections.abc import Iterable, Set
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx
 from dotenv import load_dotenv
@@ -75,11 +77,18 @@ INSTRUCTIONS = (
 )
 
 
-def classify_with_llm(
-    descriptions: dict[str, str], categories: list[str]
-) -> dict[str, str]:
-    """descriptions: merchant key -> example raw description. Returns merchant -> category
-    for every merchant Jev answered validly and confidently; the rest are omitted."""
+class Decision(NamedTuple):
+    merchant: str
+    choice: str | None  # None when the request failed
+    confidence: float | None
+    status: str  # ok | unsure | said_other | failed
+    latency_ms: float
+    model: str | None
+
+
+def ask_jev(descriptions: dict[str, str], categories: list[str]) -> list[Decision]:
+    """descriptions: merchant key -> example raw description. One Decision per merchant;
+    only status "ok" answers are confident enough to use."""
     load_dotenv(ROOT / ".env")
     api_key = os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
@@ -90,36 +99,54 @@ def classify_with_llm(
     explained = load_descriptions()
     criteria = {c: explained.get(c) for c in categories}
 
-    def ask(item: tuple[str, str]) -> tuple[str, str | None, float]:
+    def ask(item: tuple[str, str]) -> Decision:
         merchant, desc = item
-        return merchant, *_decide(client, api_key, model, redact(desc), criteria)
+        start = time.perf_counter()
+        choice, confidence, version = _decide(
+            client, api_key, model, redact(desc), criteria
+        )
+        latency_ms = (time.perf_counter() - start) * 1000
+        if choice is None:
+            status = "failed"
+        elif choice == FALLBACK:
+            status = "said_other"
+        elif confidence is None or confidence < min_confidence:
+            status = "unsure"
+        else:
+            status = "ok"
+        return Decision(merchant, choice, confidence, status, latency_ms, version)
 
     with httpx.Client(timeout=60) as client, ThreadPoolExecutor(WORKERS) as pool:
-        answers = list(pool.map(ask, descriptions.items()))
+        return list(pool.map(ask, descriptions.items()))
 
-    out: dict[str, str] = {}
-    failed = unsure = 0
-    for merchant, category, confidence in answers:
-        if category is None:
-            failed += 1
-        elif category == FALLBACK or confidence < min_confidence:
-            unsure += 1
-        else:
-            out[merchant] = category
+
+def classify_with_llm(
+    descriptions: dict[str, str], categories: list[str]
+) -> tuple[dict[str, str], list[Decision]]:
+    """Returns (merchant -> category for every merchant Jev answered validly and
+    confidently, every Decision including the unusable ones)."""
+    start = time.perf_counter()
+    decisions = ask_jev(descriptions, categories)
+    print(f"  Jev took {time.perf_counter() - start:.1f}s.")
+
+    out = {d.merchant: d.choice for d in decisions if d.status == "ok" and d.choice}
+    failed = sum(d.status == "failed" for d in decisions)
+    unsure = sum(d.status in ("unsure", "said_other") for d in decisions)
     if failed:
         print(
             f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'."
         )
     if unsure:
         print(
-            f"  {unsure} merchant(s) below confidence {min_confidence}; left as '{FALLBACK}' for review."
+            f"  {unsure} merchant(s) below confidence or picked '{FALLBACK}'; left for review."
         )
-    return out
+    return out, decisions
 
 
 def _decide(
     client: httpx.Client, api_key: str, model: str, desc: str, criteria: dict
-) -> tuple[str | None, float]:
+) -> tuple[str | None, float | None, str | None]:
+    """(choice, confidence, reported model version); choice is None on failure."""
     payload = {
         "model": model,
         "state": {"transaction_description": desc},
@@ -141,14 +168,17 @@ def _decide(
                 json=payload,
             )
             resp.raise_for_status()
-            answer = resp.json()["answers"]["category"]
-            category, confidence = answer["choice"], float(answer.get("confidence", 0))
+            body = resp.json()
+            answer = body["answers"]["category"]
+            category = answer["choice"]
+            confidence = answer.get("confidence")
+            confidence = None if confidence is None else float(confidence)
         except (httpx.HTTPError, KeyError, TypeError, ValueError):
             continue
         if category not in criteria:
-            return None, 0.0
-        return category, confidence
-    return None, 0.0
+            return None, None, None
+        return category, confidence, body.get("model")
+    return None, None, None
 
 
 def categorize(
@@ -156,9 +186,10 @@ def categorize(
     memory: dict[str, str],
     use_llm: bool = True,
     manual: Set[str] = frozenset(),
-) -> tuple[list[tuple[str, str]], dict[str, str]]:
-    """Returns ([(category, source)] aligned with txns, {merchant: category} newly learned from the LLM).
-    Order: your manual choices -> keyword rules -> remembered merchants -> LLM -> fallback."""
+) -> tuple[list[tuple[str, str]], dict[str, str], list[Decision]]:
+    """Returns ([(category, source)] aligned with txns, {merchant: category} newly learned
+    from the LLM, every Jev Decision made). Order: your manual choices -> keyword rules ->
+    remembered merchants -> LLM -> fallback."""
     categories, rules = load_config()
     txns = list(txns)
     results: list[tuple[str, str] | None] = []
@@ -176,9 +207,10 @@ def categorize(
             pending.setdefault(t.merchant, t.description)
 
     learned: dict[str, str] = {}
+    decisions: list[Decision] = []
     if pending and use_llm:
         print(f"  Asking Jev about {len(pending)} new merchant(s)...")
-        learned = classify_with_llm(pending, categories)
+        learned, decisions = classify_with_llm(pending, categories)
 
     final = []
     for t, r in zip(txns, results, strict=True):
@@ -189,4 +221,4 @@ def categorize(
                 else (FALLBACK, "fallback")
             )
         final.append(r)
-    return final, learned
+    return final, learned, decisions
