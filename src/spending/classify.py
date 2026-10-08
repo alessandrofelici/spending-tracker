@@ -134,6 +134,10 @@ def confident(answers: Mapping[str, Answer]) -> dict[str, str]:
     }
 
 
+def min_jev_confidence() -> float:
+    return float(os.environ.get("JEV_MIN_CONFIDENCE", DEFAULT_MIN_CONFIDENCE))
+
+
 def load_criteria(categories: list[str]) -> dict[str, str | None]:
     """Category -> description, exactly as Jev sees it."""
     explained = load_descriptions()
@@ -157,7 +161,7 @@ def classify_with_llm(
     if not api_key:
         raise RuntimeError("OPENROUTER_KEY is not set in .env")
     model = os.environ.get("JEV_MODEL", DEFAULT_MODEL)
-    min_confidence = float(os.environ.get("JEV_MIN_CONFIDENCE", DEFAULT_MIN_CONFIDENCE))
+    min_confidence = min_jev_confidence()
 
     criteria = load_criteria(categories)
     key = criteria_key(criteria)
@@ -170,28 +174,18 @@ def classify_with_llm(
         answers = list(pool.map(ask, descriptions.items()))
 
     out: dict[str, Answer] = {}
-    failed = unsure = 0
     for merchant, category, confidence in answers:
         if category is None:
-            failed += 1
             outcome = "failed"
         elif category == FALLBACK:
-            unsure += 1
             outcome = "chose_other"
         elif confidence < min_confidence:
-            unsure += 1
             outcome = "unsure"
         else:
             outcome = "confident"
         out[merchant] = Answer(category, confidence, outcome, key)
-    if failed:
-        print(
-            f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'."
-        )
-    if unsure:
-        print(
-            f"  {unsure} merchant(s) below confidence {min_confidence}; left as '{FALLBACK}' for review."
-        )
+    # No summary here: what an unsure answer means depends on the caller (on
+    # import the merchant becomes Other; in a re-sort it keeps its category).
     return out
 
 
@@ -265,6 +259,15 @@ def categorize(
         print(f"  Asking Jev about {len(pending)} new merchant(s)...")
         answers = classify_with_llm(pending, categories)
     learned = confident(answers)
+    if failed := sum(a.outcome == "failed" for a in answers.values()):
+        print(
+            f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'."
+        )
+    if unsure := len(answers) - failed - len(learned):
+        print(
+            f"  {unsure} merchant(s) below confidence {min_jev_confidence()};"
+            f" left as '{FALLBACK}' for review."
+        )
 
     final = []
     for t, r in zip(txns, results, strict=True):

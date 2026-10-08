@@ -130,34 +130,45 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
         conn.commit()
         answers = db.get_answers(conn)
 
-    moved, to_confirm, left = [], [], []
+    placed, left, to_confirm, kept = [], [], [], 0
     for m in merchants:
         a = answers.get(m["merchant"])
         sure = a is not None and a["outcome"] == "confident" and a["asked_with"] == key
         if m["fallback"]:
             if sure:
                 db.place_fallback(conn, m["merchant"], a["choice"])
-                moved.append(f"  {m['d']} -> {a['choice']}")
+                placed.append(f"    {m['d']} -> {a['choice']}")
             else:
                 left.append(m)
         elif sure and new and a["choice"] == new and m["category"] != new:
             to_confirm.append(m)
+        else:
+            kept += 1
     conn.commit()
 
-    if moved:
-        print(f"Jev placed {len(moved)} merchant(s) that were '{FALLBACK}':")
-        print("\n".join(moved))
-    if to_confirm:
-        print(
-            f"\nJev thinks {len(to_confirm)} merchant(s) belong in '{new}'; Enter accepts each move."
-        )
+    # Every count below is a share of the line above it, so they add up.
+    print(f"In '{FALLBACK}': {len(placed) + len(left)} merchant(s)")
+    if placed:
+        print(f"  {len(placed)} placed by Jev:")
+        print("\n".join(placed))
     if left:
-        print(f"{len(left)} merchant(s) still need a category.")
+        silent = sum(
+            (a := answers.get(m["merchant"])) is None or a["outcome"] == "failed"
+            for m in left
+        )
+        why = f"Jev unsure about {len(left) - silent}" + (
+            f", no answer for {silent}" if silent else ""
+        )
+        print(f"  {len(left)} still '{FALLBACK}' ({why}); review below")
+    if new:
+        print(f"Already categorized: {len(to_confirm) + kept} merchant(s)")
+        if to_confirm:
+            print(f"  {len(to_confirm)} Jev thinks belong in '{new}'; confirm below")
+        if kept:
+            print(f"  {kept} keep their category")
     if to_confirm or left:
         print()
         review_merchants(conn, categories, to_confirm + left)
-    elif not moved:
-        print("Nothing to re-sort.")
 
 
 def review_merchants(conn, categories: list[str], merchants: list) -> None:
