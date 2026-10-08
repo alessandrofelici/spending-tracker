@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import tomllib
 from collections.abc import Iterable, Mapping, Set
 from concurrent.futures import ThreadPoolExecutor
@@ -123,6 +124,7 @@ class Answer(NamedTuple):
     confidence: float
     outcome: str  # confident | unsure | chose_other | failed
     asked_with: str  # criteria_key() of the category list it chose from
+    latency_ms: float  # this request, including its retry
 
 
 def confident(answers: Mapping[str, Answer]) -> dict[str, str]:
@@ -166,15 +168,19 @@ def classify_with_llm(
     criteria = load_criteria(categories)
     key = criteria_key(criteria)
 
-    def ask(item: tuple[str, str]) -> tuple[str, str | None, float]:
+    def ask(item: tuple[str, str]) -> tuple[str, str | None, float, float]:
         merchant, desc = item
-        return merchant, *_decide(client, api_key, model, redact(desc), criteria)
+        start = time.perf_counter()
+        category, confidence = _decide(client, api_key, model, redact(desc), criteria)
+        return merchant, category, confidence, (time.perf_counter() - start) * 1000
 
+    start = time.perf_counter()
     with httpx.Client(timeout=60) as client, ThreadPoolExecutor(WORKERS) as pool:
         answers = list(pool.map(ask, descriptions.items()))
+    print(f"  Jev took {time.perf_counter() - start:.1f}s.")
 
     out: dict[str, Answer] = {}
-    for merchant, category, confidence in answers:
+    for merchant, category, confidence, latency_ms in answers:
         if category is None:
             outcome = "failed"
         elif category == FALLBACK:
@@ -183,7 +189,7 @@ def classify_with_llm(
             outcome = "unsure"
         else:
             outcome = "confident"
-        out[merchant] = Answer(category, confidence, outcome, key)
+        out[merchant] = Answer(category, confidence, outcome, key, latency_ms)
     # No summary here: what an unsure answer means depends on the caller (on
     # import the merchant becomes Other; in a re-sort it keeps its category).
     return out
