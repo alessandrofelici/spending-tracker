@@ -137,12 +137,22 @@ Spending for 2026-04
 uv run spend dashboard
 ```
 
-Starts a local Streamlit app and opens it in your browser (stop with Ctrl+C):
+Starts a local Streamlit app and opens it in your browser (stop with Ctrl+C). It has two tabs.
+
+**Spending:**
 
 - month picker with total spent, change vs the previous month, transaction count and biggest category
 - spending by category for the month
 - month-by-month stacked bars (top 7 categories, the rest grouped)
 - top 10 merchants and a filterable transaction table, with each row's categorization **source**
+
+**Categorization:** how your transactions got their categories (all months):
+
+- the share decided by keyword rules, Jev, you, or still needing review, by transactions, merchants and dollars
+- why merchants need review (Jev unsure, Jev picked Other, request failed)
+- Jev's confidence distribution against `JEV_MIN_CONFIDENCE`
+- the latest [agreement check](#checking-jev-against-your-rules) against your keyword rules
+- how long a typical month takes with Jev (measured) vs a chat LLM (estimated; see `documents/jev-review.md`)
 
 ## The monthly cycle
 
@@ -185,7 +195,8 @@ Each transaction takes the first answer it gets:
    - Each merchant is its own request, so one odd description can't affect another's answer. Requests run 8 at a time.
    - The answer can only be one of your categories (checked again locally). If Jev's confidence is below `JEV_MIN_CONFIDENCE` (default 0.6), or it picks `Other`, the merchant goes to `spend review` instead of being guessed.
    - Requests are restricted to zero-data-retention endpoints (`provider.zdr`).
-   - Cost: about $0.00002 per merchant (input tokens only).
+   - Cost: about $0.00003 per merchant (input tokens only).
+   - Every answer, including unsure and failed ones, is logged with its confidence and latency (the `jev_decisions` table) for the dashboard's Categorization tab.
 5. **Fallback:** anything left becomes `Other` and shows up in `spend review`.
 
 The **source** column in the dashboard's transaction table tells you which step decided each row:
@@ -203,6 +214,16 @@ Edit the category list, the `[descriptions]` Jev reads, or the rules in `categor
 ```toml
 "Dining" = ["STARBUCKS", "CHIPOTLE", "BLUE OWL"]
 ```
+
+### Checking Jev against your rules
+
+```bash
+uv run python -m spending.jev_eval [--no-save]
+```
+
+Sends every merchant your keyword rules already categorized to Jev (redacted, same as an import; payment rows stay local) and reports how often Jev agrees, per category, and where it doesn't. A confident disagreement often means a rule is too broad. Answers are saved for the dashboard (skip with `--no-save`) and never change your transactions. It costs about $0.002 for 60 merchants.
+
+See `documents/jev-review.md` for what Jev is, the latest results, and how it compares with a chat LLM.
 
 ## Troubleshooting
 
