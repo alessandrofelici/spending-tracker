@@ -135,12 +135,12 @@ The four disagreements:
 
 | Merchant | Rule says | Jev says (confidence, outcome) | Who's right? |
 |---|---|---|---|
-| COSTCO GAS EAST LANSING | Shopping (`COSTCO`) | Gas & Transport (1.00, confident) | **Jev**: the rule is too broad |
-| MSU POLICE DEPT ONLINE | Education (`MSU `) | Other (0.64, chose_other) | **Jev**: probably a parking ticket or fine, not education. It would go to review. |
-| MSU BIKES SERVICE CENTE | Education (`MSU `) | Gas & Transport (0.60, confident) | **Jev**: bike repair is transport |
-| AMTRAK COM WASHINGTON | Travel (`AMTRAK`) | Gas & Transport (0.50, unsure) | **Rule**, but Jev wasn't confident, so an import would send it to review rather than mislabel it |
+| A warehouse club's gas station | Shopping (`COSTCO`) | Gas & Transport (1.00, confident) | **Jev**: the rule is too broad |
+| A university police department | Education (`MSU `) | Other (0.64, chose_other) | **Jev**: probably a parking ticket or fine, not education. It would go to review. |
+| A university bike repair shop | Education (`MSU `) | Gas & Transport (0.60, confident) | **Jev**: bike repair is transport |
+| A rail ticket purchase | Travel (`AMTRAK`) | Gas & Transport (0.50, unsure) | **Rule**, but Jev wasn't confident, so an import would send it to review rather than mislabel it |
 
-**Takeaway:** where Jev disagreed with the rules, it was usually catching a rule that's too broad (`COSTCO`, `MSU `). Its only real miss came back below the threshold, so the confidence check worked as designed. The `COSTCO GAS` and `MSU ` cases are worth fixing in `categories.toml`.
+**Takeaway:** where Jev disagreed with the rules, it was usually catching a rule that's too broad (`COSTCO`, `MSU `). Its only real miss came back below the threshold, so the confidence check worked as designed. Narrowing the `COSTCO` rule so it skips gas stations, and narrowing `MSU ` so it only catches tuition and books, would fix those cases in `categories.toml`.
 
 ## Speed and cost: Jev vs a chat LLM
 
