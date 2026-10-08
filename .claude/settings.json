@@ -7,17 +7,27 @@
       "Bash(git show*)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git switch -c *)"
+      "Bash(git switch -c *)",
+      "Bash(gh issue list*)",
+      "Bash(gh issue view*)",
+      "Bash(gh label list*)"
     ],
     "ask": [
       "Bash(git commit --amend*)",
       "Bash(git rebase*)",
       "Bash(git reset --hard*)",
       "Bash(git switch main*)",
-      "Bash(git checkout main*)"
+      "Bash(git checkout main*)",
+      "Bash(gh issue create*)",
+      "Bash(gh issue edit*)",
+      "Bash(gh issue close*)",
+      "Bash(gh issue reopen*)",
+      "Bash(gh issue comment*)"
     ],
     "deny": [
-      "Bash(git push*)"
+      "Bash(git push*)",
+      "Bash(gh issue delete*)",
+      "Bash(gh issue transfer*)"
     ]
   },
   "attribution": {
