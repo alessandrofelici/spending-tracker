@@ -4,6 +4,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 
 ```
  .
+├──  categories.example.toml
 ├──  categories.toml
 ├──  data
 ├──  documents
@@ -33,7 +34,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `statements/` | ✅ | | **In use** | Drop MSUFCU CSV exports here. Holds `l50csvdl.csv` (Jan–Oct 2026). Git-ignored. |
 | `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard` |
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard` |
-| `categories.toml` | ✅ | ✅ | **In use** | Category list, descriptions Jev reads, keyword rules. Users tweak rules and can add categories with `+` in `spend review`; devs change categories. |
+| `categories.toml` | ✅ | | **In use** | Each user's own category list, descriptions Jev reads, and keyword rules. Copied from the example at setup; users tweak rules and add categories with `+` in `spend review`. Git-ignored. |
+| `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
 | `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, and `jev_answers` (Jev's last answer per merchant, used for review suggestions). Empty right now. Git-ignored. |
 | `src/spending/` | | ✅ | **Active development** | All app code (~500 lines) |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
