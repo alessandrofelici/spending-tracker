@@ -104,7 +104,9 @@ with spending_tab:
             x="month",
             y="amount",
             color="group",
-            category_orders={"group": order},
+            # Plotly orders category axes by first appearance across traces, so a
+            # month missing from the first group's trace would end up out of order.
+            category_orders={"group": order, "month": sorted(monthly.month.unique())},
             color_discrete_map=colors,
             labels={"amount": "Spent ($)", "month": "", "group": "Category"},
         )
