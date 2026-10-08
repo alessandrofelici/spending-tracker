@@ -105,7 +105,7 @@ When a merchant doesn't fit any category, type `+` (or `+Pets`) at its prompt. Y
 Then everything is **re-sorted** with the new category, because Jev's earlier answers were picked without it:
 
 1. Jev is asked again about every merchant a keyword rule didn't match. Rule matches, including payments, are never sent.
-2. Merchants still in `Other` that Jev now places confidently are moved right away, and listed.
+2. Merchants still in `Other` that Jev now confidently puts in the **new** category are moved right away, and listed. If Jev now confidently picks an **existing** category for one, it isn't moved: that pick becomes its `[suggestion]` in review. (Adding a category shifts Jev's confidence across all of them, so these are often borderline.)
 3. Merchants **Jev** had put in another category that it now confidently puts in the **new** one are moved too, and listed. Jev picked their old category before the new one existed, so this only replaces its own answer.
 4. Merchants **you** set by hand that Jev thinks belong in the new category are shown for you to confirm (their prompt says `set by you`). Enter accepts the move. Jev never moves your choices on its own, and it doesn't reshuffle merchants between categories that already existed.
 5. Whatever is still `Other` follows in the same review.
@@ -120,7 +120,7 @@ PETSMART 1234 LANSING MI  (1x, $42.10, now: Other, Jev: 55%) [Shopping] > +
 
 Asking Jev about 5 merchant(s) with the current categories...
 In 'Other': 3 merchant(s)
-  1 placed by Jev:
+  1 placed by Jev in 'Pets':
     BARK BOX NEW YORK NY -> Pets
   2 still 'Other' (Jev unsure about 1, no answer for 1); review below
 Already categorized: 3 merchant(s)
@@ -133,7 +133,7 @@ CHEWY.COM  (2x, $61.40, now: Shopping (set by you), Jev: 92%) [Pets] >
   -> Pets (2 transactions updated)
 ```
 
-`--resort CATEGORY` runs the same re-sort on its own, e.g. after adding a category to `categories.toml` by hand. Plain `--resort` only retries the `Other` pile with the current categories. Either way, a merchant is only re-sent to Jev if the categories or their descriptions changed since it was last asked, or the last request failed.
+`--resort CATEGORY` runs the same re-sort on its own, e.g. after adding a category to `categories.toml` by hand. Plain `--resort` only retries the `Other` pile with the current categories, and applies any confident answer. Either way, a merchant is only re-sent to Jev if the categories or their descriptions changed since it was last asked, or the last request failed.
 
 ### `spend set`
 

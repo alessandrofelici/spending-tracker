@@ -1,6 +1,6 @@
 # Re-sort Issues (after adding a category)
 
-**Status: resolved** in `594f046` (issue 1) and `b01f88c` (issue 2).
+**Status: resolved** in `594f046` (issue 1), `b01f88c` (issue 2) and `957b1c7` (issue 3).
 
 Both came up the first time the re-sort ran on real data, when `Cosmetic` and then `Athletic` were added with `+` in `spend review`. The numbers below come from read-only, count-only queries against that database. No merchant names are recorded here.
 
@@ -85,6 +85,28 @@ The confirmation exists so Jev never overrides **you**. But replacing Jev's *own
 
 **Your two `Entertainment` merchants:** their 98% answers are still stored for the current categories, so `uv run spend review --resort Athletic` moves them now without asking Jev again.
 
+## Issue 3: adding a category moved unrelated merchants out of Other
+
+### Definition
+
+After adding a test category, `TEST` ("Anything from Illinois"), nothing went into `TEST`. But two merchants that had been in `Other` were placed into categories that already existed: one into Dining (62%) and one into Entertainment (67%). The threshold is 60%.
+
+### Analysis
+
+The re-sort re-asks Jev about every merchant in `Other`, and it applied **any** confident answer, not just answers for the new category.
+
+Jev's confidence is spread across all the choices, so adding one moves the numbers for every merchant. Here the new choice probably took some confidence away from `Other`, which pushed both merchants just past the threshold. Asking again can also shift confidence a little on its own.
+
+These merchants weren't placed because of the new category, but because adding it nudged borderline answers over the line. That was surprising, and the placements weren't well supported.
+
+### Resolution
+
+- **With a new category** (`+`, or `--resort CATEGORY`): a merchant in `Other` is placed automatically only if Jev confidently picks the **new** category.
+  - A confident pick of an **existing** category isn't applied. The merchant stays in `Other` and comes up in review with that pick as its `[suggestion]`, so Enter accepts it.
+  - The summary counts these separately: `N Jev now suggests an existing category for; review below`.
+- **Plain `--resort`:** unchanged. Any confident answer for an `Other` merchant is applied, because retrying `Other` with improved descriptions is what that command is for.
+- **The two merchants already moved** stay where they are. Use `spend set` to change them.
+
 ## Verification
 
 - **Offline runs:** with canned Jev answers, a scratch database and a scratch copy of `categories.toml`:
@@ -93,3 +115,7 @@ The confirmation exists so Jev never overrides **you**. But replacing Jev's *own
   - A Jev-categorized merchant moves automatically.
   - A hand-set merchant is proposed, marked `(set by you)`.
 - **Checks:** `uv run pre-commit run --all-files` (Ruff, ty, guards) passes.
+- Issue 3, offline with canned Jev answers:
+  - After a category is added, an `Other` merchant that's 75% for an existing category stays `Other` and is offered as `[Shopping]`.
+  - Merchants confident for the new category are placed automatically.
+  - A plain `--resort` after a description change still places the 75% merchant automatically.
