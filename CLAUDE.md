@@ -1,6 +1,6 @@
 # Spending Tracker: instructions for Claude
 
-See README.md for usage and STRUCTURE.md for layout. Feature proposals live in `documents/`.
+See README.md for usage and STRUCTURE.md for layout. Feature proposals live in `documents/`; their work is tracked as GitHub issues (see [GitHub issues](#github-issues-filing-them-for-the-developer)).
 
 ## Git: committing on the developer's behalf
 
@@ -59,3 +59,33 @@ re-imported; old rows have no account or kind.
 - Generated files: `.venv/`, `__pycache__/`
 
 Before each commit, check `git diff --cached --stat` to confirm only the intended files are staged.
+
+## GitHub issues: filing them for the developer
+
+You can create issues on `alessandrofelici/spending-tracker` with the `gh` CLI (already logged in). **The repo is public**, so every issue is public.
+
+### When
+
+- **Only when the developer asks** ("open an issue for X", "turn documents/foo.md into an issue"). Don't file issues on your own initiative; suggest one instead.
+- Usually an issue tracks a proposal in `documents/`: the doc holds the design, the issue tracks the work. Check `gh issue list --state all` first so you don't file a duplicate.
+
+### How
+
+```bash
+gh issue create --title "<title>" --label <label> --body-file <file>
+```
+
+- Write the body to a file in your scratchpad and pass `--body-file`, so quoting can't mangle Markdown.
+- **title**: short and imperative, like a commit summary without the type ("Limit CLI flags", "Make categories.toml per-user").
+- **label**: `enhancement` (feature), `bug`, or `documentation`. Use the existing labels; don't create new ones.
+- **body**:
+  - one or two sentences on the problem and why it matters
+  - a link to the proposal, e.g. `[documents/limit-flags.md](https://github.com/alessandrofelici/spending-tracker/blob/main/documents/limit-flags.md)`, instead of copying it
+  - the decisions or open questions still to settle, as a task list (`- [ ]`)
+- After creating it, add the issue link to the doc's **Status** line (e.g. `**Status: open** ([#3](https://github.com/alessandrofelici/spending-tracker/issues/3)).`) and commit that as a `docs` change.
+- When a pull request finishes an issue's work, put `Closes #N` in its description so merging closes the issue.
+
+### Never
+
+- Never put bank data in an issue: no real merchant names from `statements/` or the database, amounts, account numbers, `.env` contents or keys. Use made-up examples like the README's (`PETSMART 1234 LANSING MI`).
+- Never close, edit, delete or comment on existing issues without the developer's OK. (`gh issue create`, `edit`, `close`, `comment` prompt; `delete` is blocked.)

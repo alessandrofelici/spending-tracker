@@ -10,14 +10,26 @@
       "Bash(git switch -c *)",
       "Bash(git push*)",
       "Bash(gh pr *)",
-      "Bash(gh repo view*)"
+      "Bash(gh repo view*)",
+      "Bash(gh issue list*)",
+      "Bash(gh issue view*)",
+      "Bash(gh label list*)"
     ],
     "ask": [
       "Bash(git commit --amend*)",
       "Bash(git rebase*)",
       "Bash(git reset --hard*)",
       "Bash(git switch main*)",
-      "Bash(git checkout main*)"
+      "Bash(git checkout main*)",
+      "Bash(gh issue create*)",
+      "Bash(gh issue edit*)",
+      "Bash(gh issue close*)",
+      "Bash(gh issue reopen*)",
+      "Bash(gh issue comment*)"
+    ],
+    "deny": [
+      "Bash(gh issue delete*)",
+      "Bash(gh issue transfer*)"
     ]
   },
   "attribution": {
