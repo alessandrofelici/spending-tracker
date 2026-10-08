@@ -26,7 +26,7 @@ uv run spend review
 uv run spend dashboard
 ```
 
-`categories.toml` is yours: it's git-ignored, so the categories, descriptions and keyword rules you add (by hand or with `+` in `spend review`) never end up in git. Before your first import, look through it: drop categories you don't need, add ones you do, and put the stores you shop at in `[rules]`. The example's rules are for one person's spending around East Lansing, MI.
+`categories.toml` is yours: it's git-ignored, so the categories, descriptions and keyword rules you add (by hand or with `+` in `spend review`) never end up in git. Before your first import, look through it: drop categories you don't need, add ones you do, and put the stores you shop at in `[rules]`. The example's rules use generic keywords (national chains, `TRANSIT`, `HOSPITAL`, `UNIVERSITY`), so add the local stores, utilities and transit you actually pay.
 
 
 ## Commands
