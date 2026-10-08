@@ -49,6 +49,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `documents/extend-review.md` | | ✅ | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
 | `documents/resort-issues.md` | | ✅ | Resolved | Analysis of two re-sort problems found on real data: summary counts that didn't add up, and 98%-confident moves that still asked for approval |
 | `documents/limit-flags.md` | | ✅ | Proposal | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm` |
+| `documents/per-user-categories.md` | | ✅ | Implemented | `categories.toml` is each user's git-ignored copy of `categories.example.toml`, made at setup; how to upgrade an existing checkout |
 | `.venv/` | | | Generated | Created by `uv sync` |
 
 ## Layers
