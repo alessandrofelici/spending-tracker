@@ -82,6 +82,7 @@ gh issue create --title "<title>" --label <label> --body-file <file>
   - a link to the proposal, e.g. `[documents/limit-flags.md](https://github.com/alessandrofelici/spending-tracker/blob/main/documents/limit-flags.md)`, instead of copying it
   - the decisions or open questions still to settle, as a task list (`- [ ]`)
 - After creating it, add the issue link to the doc's **Status** line (e.g. `**Status: open** ([#3](https://github.com/alessandrofelici/spending-tracker/issues/3)).`) and commit that as a `docs` change.
+- When a pull request finishes an issue's work, put `Closes #N` in its description so merging closes the issue.
 
 ### Never
 
