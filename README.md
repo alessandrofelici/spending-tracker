@@ -106,8 +106,11 @@ Then everything is **re-sorted** with the new category, because Jev's earlier an
 
 1. Jev is asked again about every merchant a keyword rule didn't match. Rule matches, including payments, are never sent.
 2. Merchants still in `Other` that Jev now places confidently are moved right away, and listed.
-3. Merchants anywhere else (including ones you set by hand) that Jev thinks belong in the **new** category are shown for you to confirm. Enter accepts the move. Jev never moves them on its own, and it doesn't reshuffle merchants between categories that already existed.
-4. Whatever is still `Other` follows in the same review.
+3. Merchants **Jev** had put in another category that it now confidently puts in the **new** one are moved too, and listed. Jev picked their old category before the new one existed, so this only replaces its own answer.
+4. Merchants **you** set by hand that Jev thinks belong in the new category are shown for you to confirm (their prompt says `set by you`). Enter accepts the move. Jev never moves your choices on its own, and it doesn't reshuffle merchants between categories that already existed.
+5. Whatever is still `Other` follows in the same review.
+
+The summary splits every merchant it looked at into these groups, so the numbers add up:
 
 ```
 PETSMART 1234 LANSING MI  (1x, $42.10, now: Other, Jev: 55%) [Shopping] > +
@@ -116,14 +119,18 @@ PETSMART 1234 LANSING MI  (1x, $42.10, now: Other, Jev: 55%) [Shopping] > +
   -> Pets (1 transactions updated)
 
 Asking Jev about 5 merchant(s) with the current categories...
-Jev placed 1 merchant(s) that were 'Other':
-  BARK BOX NEW YORK NY -> Pets
-
-Jev thinks 1 merchant(s) belong in 'Pets'; Enter accepts each move.
-2 merchant(s) still need a category.
+In 'Other': 3 merchant(s)
+  1 placed by Jev:
+    BARK BOX NEW YORK NY -> Pets
+  2 still 'Other' (Jev unsure about 1, no answer for 1); review below
+Already categorized: 3 merchant(s)
+  1 moved by Jev (it picked them before 'Pets' existed):
+    BOOKNOOK OKEMOS MI (Shopping) -> Pets
+  1 you set by hand that Jev thinks belong in 'Pets'; confirm below
+  1 keep their category
 ...
-BOOKNOOK OKEMOS MI  (1x, $9.99, now: Shopping, Jev: 80%) [Pets] >
-  -> Pets (1 transactions updated)
+CHEWY.COM  (2x, $61.40, now: Shopping (set by you), Jev: 92%) [Pets] >
+  -> Pets (2 transactions updated)
 ```
 
 `--resort CATEGORY` runs the same re-sort on its own, e.g. after adding a category to `categories.toml` by hand. Plain `--resort` only retries the `Other` pile with the current categories. Either way, a merchant is only re-sent to Jev if the categories or their descriptions changed since it was last asked, or the last request failed.
