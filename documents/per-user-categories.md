@@ -38,6 +38,8 @@
 - Each git worktree needs its own copy, or point `SPENDING_CATEGORIES` in `.env` at a shared one.
 - The old committed versions stay in git history. This stops new ones being committed; it doesn't remove past ones.
 
+## Resolved
+- **Generic example rules.** The location-specific rules (local transit, campus health center, local hospital, university, a regional grocer and two regional utilities) were replaced with generic keywords (`TRANSIT`, `HOSPITAL`, `CLINIC`, `UNIVERSITY`, `COLLEGE`, `TUITION`, `ELECTRIC`). Users add their own local stores in their copy.
+
 ## Open questions
-- Should `categories.example.toml` drop the East Lansing–specific rules (`CATA`, `OLIN`, `SPARROW`, `MSU `, `MICHIGAN STATE`, `SPARTAN`) for a more generic starting point?
 - When `categories.example.toml` gains a category later, existing users won't get it. Is a note in the release enough, or should `spend` point out categories in the example that are missing from your copy?
