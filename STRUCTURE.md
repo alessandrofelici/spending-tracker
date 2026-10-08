@@ -9,6 +9,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 ├──  data
 ├──  documents
 │   ├──  checking-ideas.md
+│   ├──  jev-review.md
 │   └──  plaid-ideas.md
 ├──  pyproject.toml
 ├── 󰂺 README.md
@@ -19,6 +20,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 │       ├──  cli.py
 │       ├──  dashboard.py
 │       ├──  db.py
+│       ├──  jev_eval.py
+│       ├──  jev_tab.py
 │       └──  parser.py
 ├──  statements
 │   └──  l50csvdl.csv
@@ -36,8 +39,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard` |
 | `categories.toml` | ✅ | | **In use** | Each user's own category list, descriptions Jev reads, and keyword rules. Copied from the example at setup; users tweak rules and add categories with `+` in `spend review`. Git-ignored. |
 | `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
-| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, and `jev_answers` (Jev's last answer per merchant, used for review suggestions). Empty right now. Git-ignored. |
-| `src/spending/` | | ✅ | **Active development** | All app code (~500 lines) |
+| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`). Git-ignored. |
+| `src/spending/` | | ✅ | **Active development** | All app code (~1,400 lines) |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
 | `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
 | `.env` | | ✅ | Secret | `OPENROUTER_KEY`. Git-ignored. |
@@ -45,6 +48,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `STRUCTURE.md` | | ✅ | Docs | This file |
 | `documents/` | | ✅ | **Planning** | Feature proposals, separate from the MVP (see [Planned features](#planned-features)) |
 | `documents/plaid-ideas.md` | | ✅ | Proposal | Automatic monthly pull via Plaid instead of manual CSV downloads. MSUFCU is supported (Plaid Exchange); free Trial plan covers it. |
+| `documents/jev-review.md` | | ✅ | Docs | What Jev is, how `classify.py` uses it, agreement eval results, and speed/cost vs a chat LLM (with how it was estimated) |
 | `documents/checking-ideas.md` | | ✅ | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
 | `documents/extend-review.md` | | ✅ | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
 | `documents/resort-issues.md` | | ✅ | Resolved | Analysis of two re-sort problems found on real data: summary counts that didn't add up, and 98%-confident moves that still asked for approval |
@@ -75,7 +79,8 @@ flowchart TB
         D2["parser.py"]
         D3["classify.py"]
         D4["db.py"]
-        D5["dashboard.py"]
+        D5["dashboard.py<br/>+ jev_tab.py"]
+        D6["jev_eval.py"]
     end
 
     subgraph STORE["💾 Generated"]
@@ -89,6 +94,7 @@ flowchart TB
     C2 --> D3
     D4 --> S1
     D5 --> S1
+    D6 --> S1
 ```
 
 ## Module dependencies
@@ -100,6 +106,8 @@ flowchart LR
     classify["classify.py<br/>manual → rules → memory → Jev"]
     db["db.py<br/>SQLite schema + queries"]
     dash["dashboard.py<br/>Streamlit + Plotly"]
+    jevtab["jev_tab.py<br/>Categorization tab"]
+    jeval["jev_eval.py<br/>Jev vs keyword rules"]
     toml[("categories.toml")]
     sqlite[("data/spending.db")]
     llm{{"Jev via OpenRouter<br/>typesafe/jev-1.13"}}
@@ -112,6 +120,10 @@ flowchart LR
     classify --> llm
     classify --> db
     dash --> db
+    dash --> jevtab
+    jevtab --> db
+    jeval --> classify
+    jeval --> db
     db --> sqlite
 ```
 
@@ -131,6 +143,7 @@ flowchart TD
     U -- no --> E["redact: mask tokens with 3+ digits"]
     E --> F["Jev via OpenRouter<br/>choice question, one request per merchant"]
     F --> G{"Valid category and<br/>confidence ≥ 0.6?"}
+    F -. "every answer:<br/>confidence, outcome, latency" .-> JD[("jev_answers")]
     G -- yes --> L["category (llm)<br/>+ saved to merchant_memory"]
     G -- no --> O["Other (fallback)<br/>guess saved to jev_answers<br/>→ spend review"]
     MN & R & M & L & O --> H["db.py: INSERT OR IGNORE<br/>deduplicated by hash"]
