@@ -16,7 +16,7 @@ You are **authorized to commit without asking**, within these rules. Anything ou
 
 - **Never commit directly to `main`.** If you're on `main`, create a branch first: `git switch -c <type>/<short-name>`, e.g. `feat/jev-review`, `fix/set-matching`, `chore/pre-commit-hooks`.
 - In a git worktree, commit on that worktree's branch.
-- **Never push**, and never amend, rebase or reset commits; ask the developer instead. (Push is blocked in `.claude/settings.json`; amend, rebase, `reset --hard` and switching to `main` prompt.)
+- **Push only when the developer asks** (e.g. to open a PR), and never to `main`. Never amend, rebase or reset commits; ask the developer instead. (Push is allowed in `.claude/settings.json`; amend, rebase, `reset --hard` and switching to `main` prompt.)
 
 ### Message format: Conventional Commits
 
