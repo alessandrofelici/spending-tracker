@@ -1,6 +1,6 @@
 # Jev Review
 
-**Status: implemented** ([#4](https://github.com/alessandrofelici/spending-tracker/issues/4)) on `worktree-jev-review`, not merged yet.
+**Status: implemented** ([#4](https://github.com/alessandrofelici/spending-tracker/issues/4)) in [#9](https://github.com/alessandrofelici/spending-tracker/pull/9).
 
 ## Motivation
 - Teach the developer about jev
