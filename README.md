@@ -12,16 +12,21 @@ uv sync
 
 # 2. Copy .env.example to .env, add an OpenRouter key
 
-# 3. Download transactions from MSUFCU and put the CSV in statements/
+# 3. Make your own categories (TODO: edit them to fit your spending)
+cp categories.example.toml categories.toml
 
-# 4. Preview, then import everything you have
+# 4. Download transactions from MSUFCU and put the CSV in statements/
+
+# 5. Preview, then import everything you have
 uv run spend import statements/*.csv --dry-run --no-llm   # offline preview
 uv run spend import statements/*.csv
 
-# 5. Fix whatever the LLM couldn't place, then look at the charts
+# 6. Fix whatever the LLM couldn't place, then look at the charts
 uv run spend review
 uv run spend dashboard
 ```
+
+`categories.toml` is yours: it's git-ignored, so the categories, descriptions and keyword rules you add (by hand or with `+` in `spend review`) never end up in git. Before your first import, look through it: drop categories you don't need, add ones you do, and put the stores you shop at in `[rules]`. The example's rules are for one person's spending around East Lansing, MI.
 
 
 ## Commands
@@ -273,6 +278,7 @@ See `documents/jev-review.md` for what Jev is, the latest results, and how it co
 | Problem | Fix |
 |---|---|
 | `No transactions found` | Make sure it's the CSV export (not PDF) and that the file has a `"Date","Amount",...` header row. |
+| `categories.toml not found` | `cp categories.example.toml categories.toml` (setup step 3). |
 | `OPENROUTER_KEY is not set` | Add it to `.env`, or run with `--no-llm`. |
 | `N request(s) failed` | Network or API error. Those merchants become `Other`; re-run the import later (duplicates are skipped) or use `spend review`. |
 | Many merchants `below confidence` | Improve the category `[descriptions]` in `categories.toml` and run `spend review --resort`, or lower `JEV_MIN_CONFIDENCE` in `.env`. |

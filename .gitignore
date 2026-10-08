@@ -9,3 +9,6 @@ data/
 *.pdf
 *.csv
 *.db
+
+# Each user's own categories and rules; categories.example.toml is the template
+categories.toml

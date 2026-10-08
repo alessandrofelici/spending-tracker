@@ -1,3 +1,8 @@
+# Example categories. Copy this file to categories.toml and make it yours:
+#   cp categories.example.toml categories.toml
+# categories.toml is git-ignored, so your categories and rules stay local.
+# `spend review` writes categories you add with `+` there, not here.
+#
 # The only categories a transaction can ever be assigned.
 # The LLM is constrained to this list; anything else is rejected.
 categories = [

@@ -1,6 +1,6 @@
 # Re-sort Issues (after adding a category)
 
-**Status: resolved** in `594f046` (issue 1), `b01f88c` (issue 2) and `957b1c7` (issue 3).
+**Status: resolved** ([#3](https://github.com/alessandrofelici/spending-tracker/issues/3)) in `594f046` (issue 1), `b01f88c` (issue 2) and `957b1c7` (issue 3).
 
 Both came up the first time the re-sort ran on real data, when `Cosmetic` and then `Athletic` were added with `+` in `spend review`. The numbers below come from read-only, count-only queries against that database. No merchant names are recorded here.
 

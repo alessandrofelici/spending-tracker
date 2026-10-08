@@ -1,6 +1,6 @@
 # Plaid Ideas
 
-> **Status:** Proposal, separate from the MVP (CSV import). Nothing here is built yet.
+> **Status:** Proposal ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)), separate from the MVP (CSV import). Nothing here is built yet.
 > **Goal:** Replace the manual "download CSV → `spend import`" step with an automatic monthly pull of transactions.
 
 ## Automation

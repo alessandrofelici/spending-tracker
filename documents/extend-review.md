@@ -1,6 +1,6 @@
 # Extend Review Command
 
-**Status: implemented.** Usage is in README.md, under `spend review`.
+**Status: implemented** ([#2](https://github.com/alessandrofelici/spending-tracker/issues/2)). Usage is in README.md, under `spend review`.
 
 ## Motivation
 - User can self categorize transactions jev is not confident about

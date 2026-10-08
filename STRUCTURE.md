@@ -4,6 +4,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 
 ```
  .
+├──  categories.example.toml
 ├──  categories.toml
 ├──  data
 ├──  documents
@@ -36,7 +37,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `statements/` | ✅ | | **In use** | Drop MSUFCU CSV exports here. Holds `l50csvdl.csv` (Jan–Oct 2026). Git-ignored. |
 | `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard` |
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard` |
-| `categories.toml` | ✅ | ✅ | **In use** | Category list, descriptions Jev reads, keyword rules. Users tweak rules and can add categories with `+` in `spend review`; devs change categories. |
+| `categories.toml` | ✅ | | **In use** | Each user's own category list, descriptions Jev reads, and keyword rules. Copied from the example at setup; users tweak rules and add categories with `+` in `spend review`. Git-ignored. |
+| `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
 | `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`). Git-ignored. |
 | `src/spending/` | | ✅ | **Active development** | All app code (~1,400 lines) |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
@@ -51,6 +53,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `documents/extend-review.md` | | ✅ | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
 | `documents/resort-issues.md` | | ✅ | Resolved | Analysis of two re-sort problems found on real data: summary counts that didn't add up, and 98%-confident moves that still asked for approval |
 | `documents/limit-flags.md` | | ✅ | Proposal | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm` |
+| `documents/per-user-categories.md` | | ✅ | Implemented | `categories.toml` is each user's git-ignored copy of `categories.example.toml`, made at setup; how to upgrade an existing checkout |
 | `.venv/` | | | Generated | Created by `uv sync` |
 
 ## Layers

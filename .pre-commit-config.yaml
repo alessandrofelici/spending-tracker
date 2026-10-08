@@ -12,10 +12,10 @@ repos:
   - repo: local
     hooks:
       - id: no-bank-data
-        name: block bank data, databases and .env
+        name: block bank data, databases, .env and categories.toml
         language: fail
-        entry: "Never commit bank data, databases or .env (see CLAUDE.md):"
-        files: '(^|/)\.env$|\.(csv|pdf|db)$|^(statements|data)/'
+        entry: "Never commit bank data, databases, .env or categories.toml (see CLAUDE.md):"
+        files: '(^|/)\.env$|\.(csv|pdf|db)$|^(statements|data)/|^categories\.toml$'
       - id: no-openrouter-key
         name: block OpenRouter API keys
         language: pygrep

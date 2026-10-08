@@ -43,3 +43,8 @@ ignore = ["E501"]
 [tool.ty.environment]
 python = ".venv"
 root = ["src"]
+
+# Claude Code worktrees are full checkouts inside the repo; each is
+# checked from its own directory, not from here.
+[tool.ty.src]
+exclude = [".claude/worktrees"]

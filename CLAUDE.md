@@ -29,7 +29,7 @@ You are **authorized to commit without asking**, within these rules. Anything ou
 ```
 
 - **type**: `feat` · `fix` · `docs` · `refactor` · `test` · `chore` (tooling, deps, config) · `perf`
-- **scope** (optional, use when it fits): `classify` · `parser` · `cli` · `db` · `dashboard` · `config` (categories.toml, .env.example) · `docs` · `hooks` · `deps`
+- **scope** (optional, use when it fits): `classify` · `parser` · `cli` · `db` · `dashboard` · `config` (categories.example.toml, .env.example) · `docs` · `hooks` · `deps`
 - **summary**: imperative mood ("add", not "added"), lowercase, no trailing period, ≤ 72 characters
 - **body**: wrap at 72 characters. Explain *why*, not what the diff already shows. Skip it only for trivial changes.
 - **Breaking changes** (schema change, renamed CLI flag or setting): add `!` after the type/scope and a `BREAKING CHANGE:` line in the body.
@@ -54,6 +54,7 @@ re-imported; old rows have no account or kind.
 ### Never commit
 
 - `.env`, real API keys, or anything matching `sk-or-`
+- `categories.toml`: it's the developer's own, git-ignored. Change default categories in `categories.example.toml`.
 - Bank data: `statements/`, `data/`, `*.csv`, `*.pdf`, `*.db` (they're git-ignored; never use `git add -f` on them)
 - Generated files: `.venv/`, `__pycache__/`
 

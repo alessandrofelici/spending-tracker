@@ -1,6 +1,6 @@
 # Git Pre-Commit Hooks
 
-**Status: implemented.** Setup and usage are in README.md, under "Development".
+**Status: implemented** ([#1](https://github.com/alessandrofelici/spending-tracker/issues/1)). Setup and usage are in README.md, under "Development".
 
 ## Motivation
 - Maintain good code quality

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import db
 from .classify import (
+    CATEGORIES_PATH,
     FALLBACK,
     add_category,
     categorize,
@@ -383,6 +384,12 @@ def main() -> None:
     s.set_defaults(func=cmd_dashboard)
 
     args = p.parse_args()
+    # categories.toml is each user's own copy (git-ignored), made at setup.
+    if args.func in (cmd_import, cmd_review, cmd_set) and not CATEGORIES_PATH.exists():
+        sys.exit(
+            f"{CATEGORIES_PATH} not found. Copy categories.example.toml to"
+            " categories.toml and edit it to fit your spending (see README)."
+        )
     args.func(args)
 
 
