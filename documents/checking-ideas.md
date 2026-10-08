@@ -1,6 +1,6 @@
 # Checking Ideas
 
-> **Status:** Proposal, separate from the MVP (credit card only). Nothing here is built yet.
+> **Status:** Proposal ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)), separate from the MVP (credit card only). Nothing here is built yet.
 > **Goal:** Show *all* money going out, including what never touches the credit card, without counting anything twice.
 
 ## Motivation

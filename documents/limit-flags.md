@@ -1,6 +1,6 @@
 # Limit CLI Flags
 
-**Status: open.** Not started.
+**Status: open** ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)). Not started.
 
 ## Motivation
 - Keep the CLI small: every flag is something to learn, document and test.

@@ -1,6 +1,6 @@
 # Per-User Categories
 
-**Status: implemented** on `feat/per-user-categories`, not merged yet. No issue yet: file one with the GitHub issues workflow in CLAUDE.md.
+**Status: implemented** ([#5](https://github.com/alessandrofelici/spending-tracker/issues/5)) on `feat/per-user-categories`, not merged yet.
 
 ## Motivation
 - `categories.toml` is personal: the categories someone needs, the descriptions Jev reads, and keyword rules naming the stores they shop at.

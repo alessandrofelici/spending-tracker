@@ -1,5 +1,7 @@
 # Jev Review
 
+**Status: implemented** ([#4](https://github.com/alessandrofelici/spending-tracker/issues/4)) on `worktree-jev-review`, not merged yet.
+
 ## Motivation
 - Teach the developer about jev
 - How it is implemented in the app
