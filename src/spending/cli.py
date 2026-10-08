@@ -97,7 +97,8 @@ def cmd_review(args) -> None:
 
 def resort(conn, categories: list[str], new: str | None = None) -> None:
     """Ask Jev again now that the categories changed. Confident answers for
-    uncategorized merchants are applied, and so are confident moves into `new`
+    uncategorized merchants are applied (with `new`, only answers for `new`; the
+    rest become review suggestions), and so are confident moves into `new`
     for merchants Jev had categorized itself (it picked without `new` before).
     Moves of merchants you set by hand are only proposed. Merchants a keyword
     rule matched are never sent."""
@@ -132,12 +133,16 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
         conn.commit()
         answers = db.get_answers(conn)
 
-    placed, left, moved, to_confirm, kept = [], [], [], [], 0
+    placed, suggested, left, moved, to_confirm, kept = [], [], [], [], [], 0
     for m in merchants:
         a = answers.get(m["merchant"])
         sure = a is not None and a["outcome"] == "confident" and a["asked_with"] == key
         if m["fallback"]:
-            if sure:
+            # Adding a category shifts Jev's confidence across all of them, so
+            # an answer for an old category only becomes a suggestion.
+            if sure and new and a["choice"] != new:
+                suggested.append(m)
+            elif sure:
                 db.place_by_llm(conn, m["merchant"], a["choice"])
                 placed.append(f"    {m['d']} -> {a['choice']}")
             else:
@@ -153,10 +158,15 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
     conn.commit()
 
     # Every count below is a share of the line above it, so they add up.
-    print(f"In '{FALLBACK}': {len(placed) + len(left)} merchant(s)")
+    print(f"In '{FALLBACK}': {len(placed) + len(suggested) + len(left)} merchant(s)")
     if placed:
-        print(f"  {len(placed)} placed by Jev:")
+        print(f"  {len(placed)} placed by Jev{f' in {new!r}' if new else ''}:")
         print("\n".join(placed))
+    if suggested:
+        print(
+            f"  {len(suggested)} Jev now suggests an existing category for;"
+            " review below"
+        )
     if left:
         silent = sum(
             (a := answers.get(m["merchant"])) is None or a["outcome"] == "failed"
@@ -181,9 +191,9 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
             )
         if kept:
             print(f"  {kept} keep their category")
-    if to_confirm or left:
+    if to_confirm or suggested or left:
         print()
-        review_merchants(conn, categories, to_confirm + left)
+        review_merchants(conn, categories, to_confirm + suggested + left)
 
 
 def review_merchants(conn, categories: list[str], merchants: list) -> None:
