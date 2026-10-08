@@ -46,9 +46,25 @@ CREATE TABLE IF NOT EXISTS jev_answers (
     choice     TEXT,            -- Jev's top pick; NULL if the request failed
     confidence REAL NOT NULL,
     outcome    TEXT NOT NULL,   -- confident | unsure | chose_other | failed
-    asked_with TEXT NOT NULL    -- hash of the categories + descriptions it chose from
+    asked_with TEXT NOT NULL,   -- hash of the categories + descriptions it chose from
+    latency_ms REAL             -- that request, including its retry; NULL if older
+);
+
+-- `python -m spending.jev_eval`: Jev's answer for merchants a keyword rule already
+-- categorized. Kept apart from jev_answers so it never changes review suggestions.
+CREATE TABLE IF NOT EXISTS jev_evals (
+    merchant     TEXT NOT NULL,
+    rule         TEXT NOT NULL,   -- the category the keyword rule gave it
+    choice       TEXT,            -- Jev's pick; NULL if the request failed
+    confidence   REAL NOT NULL,
+    outcome      TEXT NOT NULL,   -- confident | unsure | chose_other | failed
+    latency_ms   REAL NOT NULL,
+    evaluated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
+
+# Columns added after a table was first created: (table, column, definition).
+MIGRATIONS = [("jev_answers", "latency_ms", "REAL")]
 
 
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
@@ -56,6 +72,11 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    for table, column, definition in MIGRATIONS:
+        if column not in {
+            r["name"] for r in conn.execute(f"PRAGMA table_info({table})")
+        }:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     return conn
 
 
@@ -90,8 +111,25 @@ def get_answers(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
 
 def save_answers(conn: sqlite3.Connection, answers: Mapping[str, "Answer"]) -> None:
     conn.executemany(
-        "INSERT OR REPLACE INTO jev_answers VALUES (?, ?, ?, ?, ?)",
+        """INSERT OR REPLACE INTO jev_answers
+           (merchant, choice, confidence, outcome, asked_with, latency_ms)
+           VALUES (?, ?, ?, ?, ?, ?)""",
         [(m, *a) for m, a in answers.items()],
+    )
+
+
+def save_evals(
+    conn: sqlite3.Connection, answers: Mapping[str, "Answer"], rules: Mapping[str, str]
+) -> None:
+    """rules: merchant -> the category its keyword rule gave it."""
+    conn.executemany(
+        """INSERT INTO jev_evals
+           (merchant, rule, choice, confidence, outcome, latency_ms)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [
+            (m, rules[m], a.choice, a.confidence, a.outcome, a.latency_ms)
+            for m, a in answers.items()
+        ],
     )
 
 

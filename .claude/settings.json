@@ -8,6 +8,9 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git switch -c *)",
+      "Bash(git push*)",
+      "Bash(gh pr *)",
+      "Bash(gh repo view*)",
       "Bash(gh issue list*)",
       "Bash(gh issue view*)",
       "Bash(gh label list*)"
@@ -25,7 +28,6 @@
       "Bash(gh issue comment*)"
     ],
     "deny": [
-      "Bash(git push*)",
       "Bash(gh issue delete*)",
       "Bash(gh issue transfer*)"
     ]
