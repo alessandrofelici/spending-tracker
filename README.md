@@ -31,7 +31,7 @@ All commands run as `uv run spend <command>`. Add `--help` to any of them for th
 | Command | What it does | Changes data? |
 |---|---|:-:|
 | [`import`](#spend-import) | Read CSV export(s), categorize, store | ✅ |
-| [`review`](#spend-review) | Walk through uncategorized merchants and pick categories | ✅ |
+| [`review`](#spend-review) | Walk through uncategorized merchants, pick or create categories | ✅ |
 | [`set`](#spend-set) | Set one merchant's category directly | ✅ |
 | [`summary`](#spend-summary) | Print one month's spending by category | — |
 | [`dashboard`](#spend-dashboard) | Open the charts in your browser | — |
@@ -66,17 +66,22 @@ oct.csv:
 
 ```bash
 uv run spend review [--all]
+uv run spend review --resort [CATEGORY]
 ```
 
-Shows each merchant that ended up as `Other` (fallback), biggest total first, and asks for a category number. Your answer:
+Shows each merchant that ended up as `Other` (fallback), biggest total first, and asks for a category. Your answer:
 
 - updates **all** past transactions from that merchant, and
 - is remembered as a **manual** choice that beats rules and the LLM on every future import.
 
+When Jev had a guess it wasn't confident enough to use, the prompt shows it with its confidence, and Enter accepts it.
+
 | Key | Action |
 |---|---|
 | `1`–`13` | Set that category |
-| Enter | Skip this merchant |
+| Enter | Accept Jev's `[suggestion]`, or skip if there is none |
+| `+` | Create a new category (see below) |
+| `s` | Skip this merchant |
 | `q` | Stop (choices so far are saved) |
 
 `--all` reviews every merchant that you haven't set by hand, including ones categorized by rules or the LLM. Use it after the first import to spot-check the LLM.
@@ -86,11 +91,49 @@ Shows each merchant that ended up as `Other` (fallback), biggest total first, an
    2. Dining
    ...
   13. Other
-Enter a number to set the category, Enter to skip, q to quit.
+Number = set that category, Enter = accept the [suggestion] (or skip if there is none), + = new category, s = skip, q = quit.
 
-JIFFY PUZZLE CO 5551234567 OKEMOS MI  (1x, $18.00, now: Other) > 3
+PETSMART 1234 LANSING MI  (1x, $42.10, now: Other, Jev: 55%) [Shopping] > 3
   -> Shopping (1 transactions updated)
+MYSTERY LLC LANSING MI  (1x, $30.00, now: Other, Jev: no answer) > s
 ```
+
+#### Adding a category
+
+When a merchant doesn't fit any category, type `+` (or `+Pets`) at its prompt. You're asked for the name and an optional description (Jev reads it, so say what belongs there). The category is added to `categories.toml` just before `Other`, and the merchant is moved into it.
+
+Then everything is **re-sorted** with the new category, because Jev's earlier answers were picked without it:
+
+1. Jev is asked again about every merchant a keyword rule didn't match. Rule matches, including payments, are never sent.
+2. Merchants still in `Other` that Jev now confidently puts in the **new** category are moved right away, and listed. If Jev now confidently picks an **existing** category for one, it isn't moved: that pick becomes its `[suggestion]` in review. (Adding a category shifts Jev's confidence across all of them, so these are often borderline.)
+3. Merchants **Jev** had put in another category that it now confidently puts in the **new** one are moved too, and listed. Jev picked their old category before the new one existed, so this only replaces its own answer.
+4. Merchants **you** set by hand that Jev thinks belong in the new category are shown for you to confirm (their prompt says `set by you`). Enter accepts the move. Jev never moves your choices on its own, and it doesn't reshuffle merchants between categories that already existed.
+5. Whatever is still `Other` follows in the same review.
+
+The summary splits every merchant it looked at into these groups, so the numbers add up:
+
+```
+PETSMART 1234 LANSING MI  (1x, $42.10, now: Other, Jev: 55%) [Shopping] > +
+  New category name (Enter to cancel): Pets
+  What belongs in 'Pets'? Jev reads this when choosing (optional): Pet food, supplies, vets
+  -> Pets (1 transactions updated)
+
+Asking Jev about 5 merchant(s) with the current categories...
+In 'Other': 3 merchant(s)
+  1 placed by Jev in 'Pets':
+    BARK BOX NEW YORK NY -> Pets
+  2 still 'Other' (Jev unsure about 1, no answer for 1); review below
+Already categorized: 3 merchant(s)
+  1 moved by Jev (it picked them before 'Pets' existed):
+    BOOKNOOK OKEMOS MI (Shopping) -> Pets
+  1 you set by hand that Jev thinks belong in 'Pets'; confirm below
+  1 keep their category
+...
+CHEWY.COM  (2x, $61.40, now: Shopping (set by you), Jev: 92%) [Pets] >
+  -> Pets (2 transactions updated)
+```
+
+`--resort CATEGORY` runs the same re-sort on its own, e.g. after adding a category to `categories.toml` by hand. Plain `--resort` only retries the `Other` pile with the current categories, and applies any confident answer. Either way, a merchant is only re-sent to Jev if the categories or their descriptions changed since it was last asked, or the last request failed.
 
 ### `spend set`
 
@@ -193,10 +236,10 @@ Each transaction takes the first answer it gets:
    - Only the Description column goes out, with any token containing 3+ digits (account/reference/phone numbers) masked. Amount, balance, draft number, dates and the account line at the top of the export are never sent.
    - Payment rows (`ACH Pmt:<account numbers>`, `HB XFR Pmt`) and `Credit Voucher` refunds are matched by local rules and never reach the model.
    - Each merchant is its own request, so one odd description can't affect another's answer. Requests run 8 at a time.
-   - The answer can only be one of your categories (checked again locally). If Jev's confidence is below `JEV_MIN_CONFIDENCE` (default 0.6), or it picks `Other`, the merchant goes to `spend review` instead of being guessed.
+   - The answer can only be one of your categories (checked again locally). If Jev's confidence is below `JEV_MIN_CONFIDENCE` (default 0.6), or it picks `Other`, the merchant goes to `spend review` instead of being guessed. Its guess is kept and offered as the default in review, and the merchant isn't asked about again until you change the categories or their descriptions.
    - Requests are restricted to zero-data-retention endpoints (`provider.zdr`).
    - Cost: about $0.00003 per merchant (input tokens only).
-   - Every answer, including unsure and failed ones, is logged with its confidence and latency (the `jev_decisions` table) for the dashboard's Categorization tab.
+   - Every answer, including unsure and failed ones, is kept with its confidence and latency (the `jev_answers` table) for review suggestions and the dashboard's Categorization tab.
 5. **Fallback:** anything left becomes `Other` and shows up in `spend review`.
 
 The **source** column in the dashboard's transaction table tells you which step decided each row:
@@ -206,7 +249,7 @@ The **source** column in the dashboard's transaction table tells you which step 
 | `manual` | You set it |
 | `rule` | Keyword rule matched |
 | `memory` | Merchant seen on an earlier import |
-| `llm` | Categorized by Jev this import |
+| `llm` | Categorized by Jev (on import, or by a review re-sort) |
 | `fallback` | Needs review |
 
 Edit the category list, the `[descriptions]` Jev reads, or the rules in `categories.toml`. Clearer descriptions mean better Jev answers. Rule keywords are case-insensitive substrings, for example:
@@ -232,7 +275,8 @@ See `documents/jev-review.md` for what Jev is, the latest results, and how it co
 | `No transactions found` | Make sure it's the CSV export (not PDF) and that the file has a `"Date","Amount",...` header row. |
 | `OPENROUTER_KEY is not set` | Add it to `.env`, or run with `--no-llm`. |
 | `N request(s) failed` | Network or API error. Those merchants become `Other`; re-run the import later (duplicates are skipped) or use `spend review`. |
-| Many merchants `below confidence` | Improve the category `[descriptions]` in `categories.toml`, or lower `JEV_MIN_CONFIDENCE` in `.env`. |
+| Many merchants `below confidence` | Improve the category `[descriptions]` in `categories.toml` and run `spend review --resort`, or lower `JEV_MIN_CONFIDENCE` in `.env`. |
+| Lots of `Other` that would fit a category you don't have | Add it with `+` in `spend review`; see [Adding a category](#adding-a-category). |
 | `spend set` says no merchant matches | Use part of the name as it appears in the dashboard's description column. |
 
 ## Development

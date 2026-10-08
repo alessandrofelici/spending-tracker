@@ -6,7 +6,16 @@ import sys
 from pathlib import Path
 
 from . import db
-from .classify import categorize, load_config
+from .classify import (
+    FALLBACK,
+    add_category,
+    categorize,
+    classify_with_llm,
+    confident,
+    criteria_key,
+    load_config,
+    load_criteria,
+)
 from .parser import parse_csv, transaction_ids
 
 
@@ -20,8 +29,12 @@ def cmd_import(args) -> None:
             print("  No transactions found. Is this an MSUFCU transactions CSV?")
             continue
 
-        results, learned, decisions = categorize(
-            txns, memory, use_llm=not args.no_llm, manual=db.get_manual_merchants(conn)
+        results, answers = categorize(
+            txns,
+            memory,
+            use_llm=not args.no_llm,
+            manual=db.get_manual_merchants(conn),
+            unplaced=db.get_unplaced(conn),
         )
         rows = [
             {
@@ -47,10 +60,11 @@ def cmd_import(args) -> None:
                 )
             continue
 
+        learned = confident(answers)
         for merchant, cat in learned.items():
             db.remember(conn, merchant, cat, "llm")
         memory.update(learned)
-        db.record_decisions(conn, [d._asdict() for d in decisions], run="import")
+        db.save_answers(conn, answers)
         added = db.insert_transactions(conn, rows)
         conn.commit()
         months = sorted({r["month"] for r in rows})
@@ -65,6 +79,12 @@ def cmd_import(args) -> None:
 def cmd_review(args) -> None:
     conn = db.connect()
     categories, _ = load_config()
+    if args.resort is not None:
+        new = args.resort or None
+        if new is not None and new not in categories:
+            sys.exit(f"Unknown category. Choose from: {', '.join(categories)}")
+        resort(conn, categories, new)
+        return
     sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source = 'fallback'"
     if args.all:
         sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source != 'manual'"
@@ -72,26 +92,194 @@ def cmd_review(args) -> None:
     if not merchants:
         print("Nothing to review.")
         return
+    review_merchants(conn, categories, merchants)
 
+
+def resort(conn, categories: list[str], new: str | None = None) -> None:
+    """Ask Jev again now that the categories changed. Confident answers for
+    uncategorized merchants are applied (with `new`, only answers for `new`; the
+    rest become review suggestions), and so are confident moves into `new`
+    for merchants Jev had categorized itself (it picked without `new` before).
+    Moves of merchants you set by hand are only proposed. Merchants a keyword
+    rule matched are never sent."""
+    merchants = conn.execute(
+        """SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s,
+                  MIN(category) category, MIN(source = 'fallback') fallback,
+                  MAX(source = 'manual') manual
+           FROM transactions GROUP BY merchant
+           HAVING MAX(source = 'rule') = 0 ORDER BY s DESC"""
+    ).fetchall()
+    key = criteria_key(load_criteria(categories))
+    answers = db.get_answers(conn)
+    stale = {
+        m["merchant"]: m["d"]
+        for m in merchants
+        # Without a new category only Other's answers are used.
+        if (new or m["fallback"])
+        and (
+            (a := answers.get(m["merchant"])) is None
+            or a["asked_with"] != key
+            or a["outcome"] == "failed"
+        )
+    }
+    if stale:
+        print(
+            f"Asking Jev about {len(stale)} merchant(s) with the current categories..."
+        )
+        try:
+            db.save_answers(conn, classify_with_llm(stale, categories))
+        except RuntimeError as e:
+            sys.exit(str(e))
+        conn.commit()
+        answers = db.get_answers(conn)
+
+    placed, suggested, left, moved, to_confirm, kept = [], [], [], [], [], 0
+    for m in merchants:
+        a = answers.get(m["merchant"])
+        sure = a is not None and a["outcome"] == "confident" and a["asked_with"] == key
+        if m["fallback"]:
+            # Adding a category shifts Jev's confidence across all of them, so
+            # an answer for an old category only becomes a suggestion.
+            if sure and new and a["choice"] != new:
+                suggested.append(m)
+            elif sure:
+                db.place_by_llm(conn, m["merchant"], a["choice"])
+                placed.append(f"    {m['d']} -> {a['choice']}")
+            else:
+                left.append(m)
+        elif sure and new and a["choice"] == new and m["category"] != new:
+            if m["manual"]:
+                to_confirm.append(m)
+            else:
+                db.place_by_llm(conn, m["merchant"], new)
+                moved.append(f"    {m['d']} ({m['category']}) -> {new}")
+        else:
+            kept += 1
+    conn.commit()
+
+    # Every count below is a share of the line above it, so they add up.
+    print(f"In '{FALLBACK}': {len(placed) + len(suggested) + len(left)} merchant(s)")
+    if placed:
+        print(f"  {len(placed)} placed by Jev{f' in {new!r}' if new else ''}:")
+        print("\n".join(placed))
+    if suggested:
+        print(
+            f"  {len(suggested)} Jev now suggests an existing category for;"
+            " review below"
+        )
+    if left:
+        silent = sum(
+            (a := answers.get(m["merchant"])) is None or a["outcome"] == "failed"
+            for m in left
+        )
+        why = f"Jev unsure about {len(left) - silent}" + (
+            f", no answer for {silent}" if silent else ""
+        )
+        print(f"  {len(left)} still '{FALLBACK}' ({why}); review below")
+    if new:
+        total = len(moved) + len(to_confirm) + kept
+        print(f"Already categorized: {total} merchant(s)")
+        if moved:
+            print(
+                f"  {len(moved)} moved by Jev (it picked them before '{new}' existed):"
+            )
+            print("\n".join(moved))
+        if to_confirm:
+            print(
+                f"  {len(to_confirm)} you set by hand that Jev thinks belong in"
+                f" '{new}'; confirm below"
+            )
+        if kept:
+            print(f"  {kept} keep their category")
+    if to_confirm or suggested or left:
+        print()
+        review_merchants(conn, categories, to_confirm + suggested + left)
+
+
+def review_merchants(conn, categories: list[str], merchants: list) -> None:
+    """Ask for a category for each merchant row (merchant, d, n, s), offering
+    Jev's stored answer as the default when it's a real category."""
+    answers = db.get_answers(conn)
     for i, c in enumerate(categories, 1):
         print(f"  {i:>2}. {c}")
-    print("Enter a number to set the category, Enter to skip, q to quit.\n")
+    print(
+        "Number = set that category, Enter = accept the [suggestion] (or skip if"
+        " there is none), + = new category, s = skip, q = quit.\n"
+    )
     for m in merchants:
-        current = conn.execute(
-            "SELECT category FROM transactions WHERE merchant = ? LIMIT 1",
+        current, source = conn.execute(
+            "SELECT category, source FROM transactions WHERE merchant = ? LIMIT 1",
             (m["merchant"],),
-        ).fetchone()[0]
-        choice = input(
-            f"{m['d']}  ({m['n']}x, ${m['s']:.2f}, now: {current}) > "
-        ).strip()
-        if choice.lower() == "q":
+        ).fetchone()
+        suggestion, note = _suggest(answers.get(m["merchant"]), categories, current)
+        if source == "manual":
+            note = f" (set by you){note}"
+        default = f" [{suggestion}]" if suggestion else ""
+        prompt = (
+            f"{m['d']}  ({m['n']}x, ${m['s']:.2f}, now: {current}{note}){default} > "
+        )
+        while (choice := _ask(prompt)) is not None and choice.startswith("+"):
+            name = _new_category(choice[1:], categories)
+            if name:
+                n = db.set_merchant_category(conn, m["merchant"], name)
+                conn.commit()
+                print(f"  -> {name} ({n} transactions updated)\n")
+                # Earlier answers were picked without the new category.
+                resort(conn, load_config()[0], name)
+                return
+        if choice is None or choice.lower() == "q":
             break
         if choice.isdigit() and 1 <= int(choice) <= len(categories):
-            n = db.set_merchant_category(
-                conn, m["merchant"], categories[int(choice) - 1]
-            )
-            conn.commit()
-            print(f"  -> {categories[int(choice) - 1]} ({n} transactions updated)")
+            picked = categories[int(choice) - 1]
+        elif choice == "" and suggestion:
+            picked = suggestion
+        else:
+            continue
+        n = db.set_merchant_category(conn, m["merchant"], picked)
+        conn.commit()
+        print(f"  -> {picked} ({n} transactions updated)")
+
+
+def _ask(prompt: str) -> str | None:
+    """input(), stripped; None on Ctrl-D / Ctrl-C (treated like q)."""
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+
+def _new_category(name: str, categories: list[str]) -> str | None:
+    """Ask for a new category's name (unless given) and description, and add it
+    to categories.toml. None if cancelled."""
+    taken = {c.casefold() for c in categories}
+    name = name.strip()
+    while not name or name.casefold() in taken:
+        if name:
+            print(f"  '{name}' already exists; pick it by number instead.")
+        name = _ask("  New category name (Enter to cancel): ") or ""
+        if not name:
+            return None
+    description = _ask(
+        f"  What belongs in '{name}'? Jev reads this when choosing (optional): "
+    )
+    try:
+        return add_category(name, description or "")
+    except ValueError as e:
+        print(f"  {e}")
+        return None
+
+
+def _suggest(answer, categories: list[str], current: str) -> tuple[str | None, str]:
+    """(category to offer as the default, note for the prompt) from a jev_answers row."""
+    if answer is None:
+        return None, ""
+    if answer["outcome"] == "failed":
+        return None, ", Jev: no answer"
+    choice, pct = answer["choice"], f"{answer['confidence']:.0%}"
+    if choice not in categories or choice in (FALLBACK, current):
+        return None, f", Jev: {choice} {pct}"
+    return choice, f", Jev: {pct}"
 
 
 def cmd_set(args) -> None:
@@ -166,6 +354,14 @@ def main() -> None:
         "--all",
         action="store_true",
         help="Review every non-manual merchant, not just uncategorized",
+    )
+    s.add_argument(
+        "--resort",
+        nargs="?",
+        const="",
+        metavar="CATEGORY",
+        help="Ask Jev again with the current categories: places what it can of 'Other'"
+        " automatically, and proposes moves into CATEGORY (e.g. one you just added)",
     )
     s.set_defaults(func=cmd_review)
 

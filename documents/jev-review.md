@@ -107,7 +107,7 @@ Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
 - **The API is alpha**, so the request or response shape may change.
 - **It only sees the redacted description**, by design. Short or vague descriptions (`SQ *...`, LLC names) don't carry enough signal, and no model can fix that. Those end up in `spend review`.
 - **The question costs more than the answer.** The fixed ~600-token prompt dominates the cost. It's still a fraction of a cent per import, but trimming the descriptions makes every request cheaper.
-- **Older imports have no decision records.** Confidence, timing and the reason a merchant fell back are only stored (in `jev_decisions`) for imports made after step 2.
+- **Older imports have no decision records.** Confidence, timing and the reason a merchant fell back are only stored (in `jev_answers`) for merchants asked after this change.
 
 ## Accuracy: agreement with keyword rules
 
@@ -117,7 +117,7 @@ Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
 |---|---|
 | Jev agrees with the rule | **55 / 59 (93%)** |
 | Confident answers only (what an import keeps) | **53 / 55 (96%)** |
-| Status | ok 55, unsure 3, said_other 1, failed 0 |
+| Outcome | confident 55, unsure 3, chose_other 1, failed 0 |
 
 | Rule category | Agree / total |
 |---|--:|
@@ -133,11 +133,11 @@ Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
 
 The four disagreements:
 
-| Merchant | Rule says | Jev says (confidence, status) | Who's right? |
+| Merchant | Rule says | Jev says (confidence, outcome) | Who's right? |
 |---|---|---|---|
-| COSTCO GAS EAST LANSING | Shopping (`COSTCO`) | Gas & Transport (1.00, ok) | **Jev**: the rule is too broad |
-| MSU POLICE DEPT ONLINE | Education (`MSU `) | Other (0.64, said_other) | **Jev**: probably a parking ticket or fine, not education. It would go to review. |
-| MSU BIKES SERVICE CENTE | Education (`MSU `) | Gas & Transport (0.60, ok) | **Jev**: bike repair is transport |
+| COSTCO GAS EAST LANSING | Shopping (`COSTCO`) | Gas & Transport (1.00, confident) | **Jev**: the rule is too broad |
+| MSU POLICE DEPT ONLINE | Education (`MSU `) | Other (0.64, chose_other) | **Jev**: probably a parking ticket or fine, not education. It would go to review. |
+| MSU BIKES SERVICE CENTE | Education (`MSU `) | Gas & Transport (0.60, confident) | **Jev**: bike repair is transport |
 | AMTRAK COM WASHINGTON | Travel (`AMTRAK`) | Gas & Transport (0.50, unsure) | **Rule**, but Jev wasn't confident, so an import would send it to review rather than mislabel it |
 
 **Takeaway:** where Jev disagreed with the rules, it was usually catching a rule that's too broad (`COSTCO`, `MSU `). Its only real miss came back below the threshold, so the confidence check worked as designed. The `COSTCO GAS` and `MSU ` cases are worth fixing in `categories.toml`.
@@ -146,7 +146,7 @@ The four disagreements:
 
 ### Method
 
-**Jev is measured.** The eval above logged every request in `jev_decisions`. The numbers are wall-clock times from this machine, network included, with `WORKERS = 8`:
+**Jev is measured.** The eval above timed every request (stored in `jev_evals`). The numbers are wall-clock times from this machine, network included, with `WORKERS = 8`:
 
 - per request: **p50 216 ms, p95 446 ms, max 492 ms**
 - 59 merchants: **1.9 s** in total
@@ -226,6 +226,7 @@ What the data can't tell us yet:
 ### Steps (one commit each)
 1. **Explainer** (this document): what Jev is (a typed decision model on OpenRouter's Decisions API: you give it a state and a `choice` question with criteria, it returns a choice plus a confidence, with no text to parse), and how `classify.py` uses it (manual → rule → memory → Jev → fallback; `redact()`; one request per merchant, 8 workers; `provider.zdr`; the 0.6 threshold; the local check that the answer is a valid category). Also why it suits this task better than a chat LLM, and where it falls short. Checked against OpenRouter's docs and a real response, not written from memory.
 2. **Record Jev decisions** (`db.py`, `classify.py`): a new table `jev_decisions(merchant, choice, confidence, status, latency_ms, model, decided_at)` with `status` ∈ `ok | unsure | said_other | failed`, created with `CREATE TABLE IF NOT EXISTS` so existing DBs keep working. It's a separate table instead of new `merchant_memory` columns so that unsure or failed merchants don't become `memory` hits on the next import. `_decide()` returns latency and status; the import prints the batch's wall time.
+   - *Changed at merge (2026-10-08):* `main` had meanwhile added `jev_answers` (Jev's latest answer per merchant, used by `spend review`). Instead of a second table, `latency_ms` was added to `jev_answers`, and the eval writes to its own `jev_evals` table so it never changes review suggestions. Outcomes use main's names: `confident | unsure | chose_other | failed`.
 3. **Agreement eval** (`src/spending/jev_eval.py`, run with `uv run python -m spending.jev_eval`): opt-in, not part of import. Sends the rule-matched merchants (redacted, ZDR; payment rows excluded so they stay local) to Jev, then reports agreement overall and per category, the disagreements and per-request latency. About 62 requests, ≈ $0.001. Rows are stored tagged `eval` and never written to `merchant_memory`. This also gives real latency numbers without re-importing.
 4. **Speed estimate** (section in this document):
    - Jev: measured p50 / p95 latency per request and wall time at 8 workers, from steps 2–3.
@@ -237,7 +238,7 @@ What the data can't tell us yet:
    - Cost compared the same way.
 5. **Dashboard "Categorization" tab** (`dashboard.py`):
    - transactions, merchants and $ by source (rule / Jev / manual / fallback), where "Jev" includes `memory` hits it originally decided
-   - fallback split by `status` where known
+   - fallback split by `outcome` where known
    - a confidence histogram with the threshold marked
    - eval agreement, if it has been run
    - a measured-Jev vs estimated-chat latency chart, captioned with how the estimate was made
@@ -247,4 +248,4 @@ What the data can't tell us yet:
 - `uv run pre-commit run --all-files` before every commit.
 - `spend import --dry-run --no-llm` against a scratch copy of the DB (via `SPENDING_DB`).
 - Launch the dashboard once to check the new tab renders.
-- The real DB is only read, except for the opt-in eval writing `jev_decisions` rows.
+- The real DB is only read, except for the opt-in eval writing `jev_evals` rows.

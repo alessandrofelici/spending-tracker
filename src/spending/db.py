@@ -2,9 +2,14 @@
 
 import os
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:  # classify imports db, so only for type hints
+    from .classify import Answer
 
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(
@@ -34,19 +39,32 @@ CREATE TABLE IF NOT EXISTS merchant_memory (
     source   TEXT NOT NULL
 );
 
--- Every answer Jev gave (or failed to give), kept for the dashboard and the eval.
--- Separate from merchant_memory so unsure or failed merchants still go to review.
-CREATE TABLE IF NOT EXISTS jev_decisions (
-    merchant    TEXT NOT NULL,
-    choice      TEXT,               -- NULL when the request failed
-    confidence  REAL,
-    status      TEXT NOT NULL,      -- ok | unsure | said_other | failed
-    latency_ms  REAL NOT NULL,      -- one request, including its retry
-    model       TEXT,               -- dated model version Jev reported
-    run         TEXT NOT NULL,      -- import | eval
-    decided_at  TEXT NOT NULL DEFAULT (datetime('now'))
+-- Jev's latest answer per merchant, including ones too unsure to use, so
+-- `spend review` can suggest them and unplaced merchants aren't re-asked.
+CREATE TABLE IF NOT EXISTS jev_answers (
+    merchant   TEXT PRIMARY KEY,
+    choice     TEXT,            -- Jev's top pick; NULL if the request failed
+    confidence REAL NOT NULL,
+    outcome    TEXT NOT NULL,   -- confident | unsure | chose_other | failed
+    asked_with TEXT NOT NULL,   -- hash of the categories + descriptions it chose from
+    latency_ms REAL             -- that request, including its retry; NULL if older
+);
+
+-- `python -m spending.jev_eval`: Jev's answer for merchants a keyword rule already
+-- categorized. Kept apart from jev_answers so it never changes review suggestions.
+CREATE TABLE IF NOT EXISTS jev_evals (
+    merchant     TEXT NOT NULL,
+    rule         TEXT NOT NULL,   -- the category the keyword rule gave it
+    choice       TEXT,            -- Jev's pick; NULL if the request failed
+    confidence   REAL NOT NULL,
+    outcome      TEXT NOT NULL,   -- confident | unsure | chose_other | failed
+    latency_ms   REAL NOT NULL,
+    evaluated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
+
+# Columns added after a table was first created: (table, column, definition).
+MIGRATIONS = [("jev_answers", "latency_ms", "REAL")]
 
 
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
@@ -54,6 +72,11 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    for table, column, definition in MIGRATIONS:
+        if column not in {
+            r["name"] for r in conn.execute(f"PRAGMA table_info({table})")
+        }:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     return conn
 
 
@@ -71,6 +94,43 @@ def get_manual_merchants(conn: sqlite3.Connection) -> set[str]:
             "SELECT merchant FROM merchant_memory WHERE source = 'manual'"
         )
     }
+
+
+def get_unplaced(conn: sqlite3.Connection) -> dict[str, str]:
+    """Merchants Jev answered but couldn't place -> the criteria they were asked with."""
+    rows = conn.execute(
+        "SELECT merchant, asked_with FROM jev_answers"
+        " WHERE outcome IN ('unsure', 'chose_other')"
+    )
+    return {r["merchant"]: r["asked_with"] for r in rows}
+
+
+def get_answers(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    return {r["merchant"]: r for r in conn.execute("SELECT * FROM jev_answers")}
+
+
+def save_answers(conn: sqlite3.Connection, answers: Mapping[str, "Answer"]) -> None:
+    conn.executemany(
+        """INSERT OR REPLACE INTO jev_answers
+           (merchant, choice, confidence, outcome, asked_with, latency_ms)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [(m, *a) for m, a in answers.items()],
+    )
+
+
+def save_evals(
+    conn: sqlite3.Connection, answers: Mapping[str, "Answer"], rules: Mapping[str, str]
+) -> None:
+    """rules: merchant -> the category its keyword rule gave it."""
+    conn.executemany(
+        """INSERT INTO jev_evals
+           (merchant, rule, choice, confidence, outcome, latency_ms)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [
+            (m, rules[m], a.choice, a.confidence, a.outcome, a.latency_ms)
+            for m, a in answers.items()
+        ],
+    )
 
 
 def find_merchants(conn: sqlite3.Connection, text: str) -> list[str]:
@@ -110,21 +170,24 @@ def insert_transactions(conn: sqlite3.Connection, rows: list[dict]) -> int:
     return conn.total_changes - before
 
 
-def record_decisions(conn: sqlite3.Connection, rows: list[dict], run: str) -> None:
-    conn.executemany(
-        """INSERT INTO jev_decisions
-           (merchant, choice, confidence, status, latency_ms, model, run)
-           VALUES (:merchant, :choice, :confidence, :status, :latency_ms, :model, :run)""",
-        [r | {"run": run} for r in rows],
-    )
-
-
 def set_merchant_category(
     conn: sqlite3.Connection, merchant: str, category: str
 ) -> int:
     remember(conn, merchant, category, "manual")
     cur = conn.execute(
         "UPDATE transactions SET category = ?, source = 'manual' WHERE merchant = ?",
+        (category, merchant),
+    )
+    return cur.rowcount
+
+
+def place_by_llm(conn: sqlite3.Connection, merchant: str, category: str) -> int:
+    """Give a merchant the LLM's category on every row the LLM (or nobody)
+    decided; rows you or a rule decided are never touched."""
+    remember(conn, merchant, category, "llm")
+    cur = conn.execute(
+        "UPDATE transactions SET category = ?, source = 'llm'"
+        " WHERE merchant = ? AND source NOT IN ('manual', 'rule')",
         (category, merchant),
     )
     return cur.rowcount

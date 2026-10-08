@@ -38,7 +38,7 @@ WORKERS = 8
 
 
 @st.cache_data(ttl=30)
-def load() -> tuple[pd.DataFrame, pd.DataFrame]:
+def load() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     with connect(DB_PATH) as conn:
         txns = pd.read_sql(
             """SELECT t.merchant, t.amount, t.category, t.source,
@@ -47,10 +47,11 @@ def load() -> tuple[pd.DataFrame, pd.DataFrame]:
                WHERE t.category != 'Payments & Credits'""",
             conn,
         )
-        decisions = pd.read_sql(
-            "SELECT * FROM jev_decisions", conn, parse_dates=["decided_at"]
+        answers = pd.read_sql("SELECT * FROM jev_answers", conn)
+        evals = pd.read_sql(
+            "SELECT * FROM jev_evals", conn, parse_dates=["evaluated_at"]
         )
-    return txns, decisions
+    return txns, answers, evals
 
 
 def decider(row) -> str:
@@ -64,7 +65,7 @@ def decider(row) -> str:
 
 
 def render() -> None:
-    txns, decisions = load()
+    txns, answers, evals = load()
     if txns.empty:
         st.info("No transactions yet.")
         return
@@ -125,30 +126,24 @@ def render() -> None:
 
     left, right = st.columns(2)
     with left:
-        render_review_reasons(txns, decisions)
+        render_review_reasons(txns, answers)
     with right:
-        render_confidence(decisions)
+        render_confidence(answers, evals)
 
-    render_eval(txns, decisions)
-    render_speed(decisions)
+    render_eval(evals)
+    render_speed(answers, evals)
 
 
-def render_review_reasons(txns: pd.DataFrame, decisions: pd.DataFrame) -> None:
+def render_review_reasons(txns: pd.DataFrame, answers: pd.DataFrame) -> None:
     st.subheader("Why merchants need review")
     review = txns[txns.decider == "Needs review"].merchant.drop_duplicates()
     if review.empty:
         st.success("Nothing needs review.")
         return
-    latest = (
-        decisions[decisions.run == "import"]
-        .sort_values("decided_at")
-        .drop_duplicates("merchant", keep="last")
-        .set_index("merchant")
-        .status
-    )
+    latest = answers.set_index("merchant").outcome
     labels = {
         "unsure": "Jev unsure (below threshold)",
-        "said_other": "Jev picked Other",
+        "chose_other": "Jev picked Other",
         "failed": "Request failed",
     }
     reasons = (
@@ -176,9 +171,10 @@ def render_review_reasons(txns: pd.DataFrame, decisions: pd.DataFrame) -> None:
     )
 
 
-def render_confidence(decisions: pd.DataFrame) -> None:
+def render_confidence(answers: pd.DataFrame, evals: pd.DataFrame) -> None:
     st.subheader("How sure Jev was")
-    answered = decisions.dropna(subset=["confidence"])
+    answered = pd.concat([answers, evals])
+    answered = answered[answered.outcome != "failed"]
     if answered.empty:
         st.info("No Jev answers recorded yet. They're logged on every import.")
         return
@@ -210,11 +206,11 @@ def render_confidence(decisions: pd.DataFrame) -> None:
     )
 
 
-def render_eval(txns: pd.DataFrame, decisions: pd.DataFrame) -> None:
+def render_eval(evals: pd.DataFrame) -> None:
     st.subheader("Does Jev agree with your keyword rules?")
     evals = (
-        decisions[decisions.run == "eval"]
-        .sort_values("decided_at")
+        evals[evals.outcome != "failed"]
+        .sort_values("evaluated_at")
         .drop_duplicates("merchant", keep="last")
     )
     if evals.empty:
@@ -222,14 +218,6 @@ def render_eval(txns: pd.DataFrame, decisions: pd.DataFrame) -> None:
             "Run `uv run python -m spending.jev_eval` to compare Jev with your rules."
         )
         return
-    rule_cat = (
-        txns[txns.source == "rule"]
-        .drop_duplicates("merchant")
-        .set_index("merchant")
-        .category
-    )
-    evals = evals[evals.merchant.isin(rule_cat.index) & evals.choice.notna()].copy()
-    evals["rule"] = evals.merchant.map(rule_cat)
     evals["agrees"] = evals.choice == evals.rule
 
     c1, c2 = st.columns([1, 3])
@@ -239,9 +227,9 @@ def render_eval(txns: pd.DataFrame, decisions: pd.DataFrame) -> None:
         f"{evals.agrees.sum()} of {len(evals)} merchants",
         delta_color="off",
     )
-    c1.caption(f"Last eval: {evals.decided_at.max():%b %d, %Y}")
+    c1.caption(f"Last eval: {evals.evaluated_at.max():%b %d, %Y}")
     misses = evals[~evals.agrees][
-        ["merchant", "rule", "choice", "confidence", "status"]
+        ["merchant", "rule", "choice", "confidence", "outcome"]
     ]
     c2.dataframe(
         misses.rename(columns={"rule": "Rule says", "choice": "Jev says"}),
@@ -251,13 +239,14 @@ def render_eval(txns: pd.DataFrame, decisions: pd.DataFrame) -> None:
     )
     c2.caption(
         "Disagreements. A confident Jev answer here often means a rule is too broad; "
-        "status `unsure` means an import would have sent it to review instead."
+        "outcome `unsure` means an import would have sent it to review instead."
     )
 
 
-def render_speed(decisions: pd.DataFrame) -> None:
+def render_speed(answers: pd.DataFrame, evals: pd.DataFrame) -> None:
     st.subheader("How fast, compared with a chat LLM")
-    measured = decisions[decisions.status != "failed"].latency_ms
+    timed = pd.concat([answers, evals])
+    measured = timed[timed.outcome != "failed"].latency_ms.dropna()
     if measured.empty:
         st.info("No Jev timings recorded yet.")
         return

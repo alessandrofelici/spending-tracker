@@ -16,21 +16,25 @@ Safety measures:
   * Requests are restricted to zero-data-retention endpoints (provider.zdr).
 """
 
+import hashlib
+import json
 import os
 import re
 import time
 import tomllib
-from collections.abc import Iterable, Set
+from collections.abc import Iterable, Mapping, Set
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple
 
 import httpx
+import tomlkit
 from dotenv import load_dotenv
+from tomlkit.items import KeyType, SingleKey, Table
 
 from .db import ROOT
 
-CATEGORIES_PATH = ROOT / "categories.toml"
+CATEGORIES_PATH = Path(os.environ.get("SPENDING_CATEGORIES", ROOT / "categories.toml"))
 DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 DEFAULT_MODEL = "typesafe/jev-1.13"
 DEFAULT_MIN_CONFIDENCE = 0.6
@@ -51,6 +55,42 @@ def load_config(path: Path = CATEGORIES_PATH) -> tuple[list[str], dict[str, list
     if FALLBACK not in categories:
         categories.append(FALLBACK)
     return categories, rules
+
+
+def add_category(name: str, description: str = "", path: Path = CATEGORIES_PATH) -> str:
+    """Add a category to categories.toml just before "Other", keeping the file's
+    comments and layout. Returns the cleaned name; raises ValueError if it's unusable."""
+    name = " ".join(name.split())
+    if not name:
+        raise ValueError("The category name is empty.")
+    doc = tomlkit.parse(path.read_text(encoding="utf-8"))
+    categories = doc.get("categories")
+    if not isinstance(categories, list):
+        raise ValueError(f"{path.name} has no `categories = [...]` list.")
+    taken = {str(c).casefold(): str(c) for c in categories}
+    if name.casefold() in taken:
+        raise ValueError(f"'{taken[name.casefold()]}' already exists.")
+
+    at = categories.index(FALLBACK) if FALLBACK in categories else len(categories)
+    categories.insert(at, name)
+    if description := " ".join(description.split()):
+        if "descriptions" not in doc:
+            doc["descriptions"] = tomlkit.table()
+        table = doc["descriptions"]
+        if not isinstance(table, Table):
+            raise ValueError(f"`descriptions` in {path.name} isn't a table.")
+        key = SingleKey(name, t=KeyType.Basic)  # quoted, like the existing keys
+        body = table.value.body
+        other = next(
+            (i for i, (k, _) in enumerate(body) if k is not None and k.key == FALLBACK),
+            None,
+        )
+        if other is None:
+            table.add(key, description)
+        else:  # tomlkit has no public "insert before"; keeps "Other" last
+            table.value._insert_at(other, key, description)
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return name
 
 
 def match_rule(description: str, rules: dict[str, list[str]]) -> str | None:
@@ -77,76 +117,87 @@ INSTRUCTIONS = (
 )
 
 
-class Decision(NamedTuple):
-    merchant: str
+class Answer(NamedTuple):
+    """What Jev said about one merchant, kept even when it isn't used."""
+
     choice: str | None  # None when the request failed
-    confidence: float | None
-    status: str  # ok | unsure | said_other | failed
-    latency_ms: float
-    model: str | None
+    confidence: float
+    outcome: str  # confident | unsure | chose_other | failed
+    asked_with: str  # criteria_key() of the category list it chose from
+    latency_ms: float  # this request, including its retry
 
 
-def ask_jev(descriptions: dict[str, str], categories: list[str]) -> list[Decision]:
-    """descriptions: merchant key -> example raw description. One Decision per merchant;
-    only status "ok" answers are confident enough to use."""
+def confident(answers: Mapping[str, Answer]) -> dict[str, str]:
+    """merchant -> category for the answers good enough to use."""
+    return {
+        m: a.choice
+        for m, a in answers.items()
+        if a.outcome == "confident" and a.choice is not None
+    }
+
+
+def min_jev_confidence() -> float:
+    return float(os.environ.get("JEV_MIN_CONFIDENCE", DEFAULT_MIN_CONFIDENCE))
+
+
+def load_criteria(categories: list[str]) -> dict[str, str | None]:
+    """Category -> description, exactly as Jev sees it."""
+    explained = load_descriptions()
+    return {c: explained.get(c) for c in categories}
+
+
+def criteria_key(criteria: Mapping[str, str | None]) -> str:
+    """Changes whenever a category or its description changes, so an old
+    'unsure' answer is only trusted while Jev would see the same choices."""
+    blob = json.dumps(criteria, sort_keys=True).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def classify_with_llm(
+    descriptions: dict[str, str], categories: list[str]
+) -> dict[str, Answer]:
+    """descriptions: merchant key -> example raw description. Returns an Answer for
+    every merchant; only outcome == "confident" ones should be used as a category."""
     load_dotenv(ROOT / ".env")
     api_key = os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise RuntimeError("OPENROUTER_KEY is not set in .env")
     model = os.environ.get("JEV_MODEL", DEFAULT_MODEL)
-    min_confidence = float(os.environ.get("JEV_MIN_CONFIDENCE", DEFAULT_MIN_CONFIDENCE))
+    min_confidence = min_jev_confidence()
 
-    explained = load_descriptions()
-    criteria = {c: explained.get(c) for c in categories}
+    criteria = load_criteria(categories)
+    key = criteria_key(criteria)
 
-    def ask(item: tuple[str, str]) -> Decision:
+    def ask(item: tuple[str, str]) -> tuple[str, str | None, float, float]:
         merchant, desc = item
         start = time.perf_counter()
-        choice, confidence, version = _decide(
-            client, api_key, model, redact(desc), criteria
-        )
-        latency_ms = (time.perf_counter() - start) * 1000
-        if choice is None:
-            status = "failed"
-        elif choice == FALLBACK:
-            status = "said_other"
-        elif confidence is None or confidence < min_confidence:
-            status = "unsure"
-        else:
-            status = "ok"
-        return Decision(merchant, choice, confidence, status, latency_ms, version)
+        category, confidence = _decide(client, api_key, model, redact(desc), criteria)
+        return merchant, category, confidence, (time.perf_counter() - start) * 1000
 
-    with httpx.Client(timeout=60) as client, ThreadPoolExecutor(WORKERS) as pool:
-        return list(pool.map(ask, descriptions.items()))
-
-
-def classify_with_llm(
-    descriptions: dict[str, str], categories: list[str]
-) -> tuple[dict[str, str], list[Decision]]:
-    """Returns (merchant -> category for every merchant Jev answered validly and
-    confidently, every Decision including the unusable ones)."""
     start = time.perf_counter()
-    decisions = ask_jev(descriptions, categories)
+    with httpx.Client(timeout=60) as client, ThreadPoolExecutor(WORKERS) as pool:
+        answers = list(pool.map(ask, descriptions.items()))
     print(f"  Jev took {time.perf_counter() - start:.1f}s.")
 
-    out = {d.merchant: d.choice for d in decisions if d.status == "ok" and d.choice}
-    failed = sum(d.status == "failed" for d in decisions)
-    unsure = sum(d.status in ("unsure", "said_other") for d in decisions)
-    if failed:
-        print(
-            f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'."
-        )
-    if unsure:
-        print(
-            f"  {unsure} merchant(s) below confidence or picked '{FALLBACK}'; left for review."
-        )
-    return out, decisions
+    out: dict[str, Answer] = {}
+    for merchant, category, confidence, latency_ms in answers:
+        if category is None:
+            outcome = "failed"
+        elif category == FALLBACK:
+            outcome = "chose_other"
+        elif confidence < min_confidence:
+            outcome = "unsure"
+        else:
+            outcome = "confident"
+        out[merchant] = Answer(category, confidence, outcome, key, latency_ms)
+    # No summary here: what an unsure answer means depends on the caller (on
+    # import the merchant becomes Other; in a re-sort it keeps its category).
+    return out
 
 
 def _decide(
     client: httpx.Client, api_key: str, model: str, desc: str, criteria: dict
-) -> tuple[str | None, float | None, str | None]:
-    """(choice, confidence, reported model version); choice is None on failure."""
+) -> tuple[str | None, float]:
     payload = {
         "model": model,
         "state": {"transaction_description": desc},
@@ -168,17 +219,14 @@ def _decide(
                 json=payload,
             )
             resp.raise_for_status()
-            body = resp.json()
-            answer = body["answers"]["category"]
-            category = answer["choice"]
-            confidence = answer.get("confidence")
-            confidence = None if confidence is None else float(confidence)
+            answer = resp.json()["answers"]["category"]
+            category, confidence = answer["choice"], float(answer.get("confidence", 0))
         except (httpx.HTTPError, KeyError, TypeError, ValueError):
             continue
         if category not in criteria:
-            return None, None, None
-        return category, confidence, body.get("model")
-    return None, None, None
+            return None, 0.0
+        return category, confidence
+    return None, 0.0
 
 
 def categorize(
@@ -186,11 +234,16 @@ def categorize(
     memory: dict[str, str],
     use_llm: bool = True,
     manual: Set[str] = frozenset(),
-) -> tuple[list[tuple[str, str]], dict[str, str], list[Decision]]:
-    """Returns ([(category, source)] aligned with txns, {merchant: category} newly learned
-    from the LLM, every Jev Decision made). Order: your manual choices -> keyword rules ->
-    remembered merchants -> LLM -> fallback."""
+    unplaced: Mapping[str, str] | None = None,
+) -> tuple[list[tuple[str, str]], dict[str, Answer]]:
+    """Returns ([(category, source)] aligned with txns, {merchant: Answer} from Jev this run).
+    Order: your manual choices -> keyword rules -> remembered merchants -> LLM -> fallback.
+
+    unplaced: merchant -> criteria_key for merchants Jev already couldn't place.
+    They aren't asked again until the categories or their descriptions change."""
     categories, rules = load_config()
+    key = criteria_key(load_criteria(categories))
+    unplaced = unplaced or {}
     txns = list(txns)
     results: list[tuple[str, str] | None] = []
     pending: dict[str, str] = {}
@@ -204,21 +257,28 @@ def categorize(
             results.append((cat, "memory"))
         else:
             results.append(None)
-            pending.setdefault(t.merchant, t.description)
+            if unplaced.get(t.merchant) != key:
+                pending.setdefault(t.merchant, t.description)
 
-    learned: dict[str, str] = {}
-    decisions: list[Decision] = []
+    answers: dict[str, Answer] = {}
     if pending and use_llm:
         print(f"  Asking Jev about {len(pending)} new merchant(s)...")
-        learned, decisions = classify_with_llm(pending, categories)
+        answers = classify_with_llm(pending, categories)
+    learned = confident(answers)
+    if failed := sum(a.outcome == "failed" for a in answers.values()):
+        print(
+            f"  {failed} request(s) failed; those merchants fall back to '{FALLBACK}'."
+        )
+    if unsure := len(answers) - failed - len(learned):
+        print(
+            f"  {unsure} merchant(s) below confidence {min_jev_confidence()};"
+            f" left as '{FALLBACK}' for review."
+        )
 
     final = []
     for t, r in zip(txns, results, strict=True):
         if r is None:
-            r = (
-                (learned[t.merchant], "llm")
-                if t.merchant in learned
-                else (FALLBACK, "fallback")
-            )
+            cat = learned.get(t.merchant)
+            r = (cat, "llm") if cat else (FALLBACK, "fallback")
         final.append(r)
-    return final, learned, decisions
+    return final, answers

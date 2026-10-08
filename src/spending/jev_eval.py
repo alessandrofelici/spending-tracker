@@ -4,8 +4,8 @@
 
 Sends every merchant a keyword rule already categorized to Jev (redacted, same as an
 import) and compares the answers with the rules. Payment rows are left out, so they
-stay local. Answers are stored in jev_decisions with run = 'eval'; they are never
-written to merchant_memory and don't change any transaction.
+stay local. Answers are stored in jev_evals; they never touch jev_answers (review
+suggestions), merchant_memory or any transaction.
 """
 
 import argparse
@@ -14,7 +14,7 @@ import time
 from collections import Counter
 
 from . import db
-from .classify import ask_jev, load_config
+from .classify import classify_with_llm, load_config
 
 LOCAL_ONLY = {"Payments & Credits"}
 
@@ -41,7 +41,7 @@ def percentile(values: list[float], p: int) -> float:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--no-save", action="store_true", help="Don't store answers in jev_decisions"
+        "--no-save", action="store_true", help="Don't store answers in jev_evals"
     )
     args = parser.parse_args()
 
@@ -50,55 +50,55 @@ def main() -> None:
     if not expected:
         print("No rule-matched merchants yet. Import a statement first.")
         return
+    rule = {m: cat for m, (cat, _) in expected.items()}
     categories, _ = load_config()
 
     print(f"Asking Jev about {len(expected)} rule-matched merchant(s)...")
     start = time.perf_counter()
-    decisions = ask_jev({m: desc for m, (_, desc) in expected.items()}, categories)
+    answers = classify_with_llm(
+        {m: desc for m, (_, desc) in expected.items()}, categories
+    )
     wall = time.perf_counter() - start
 
-    answered = [d for d in decisions if d.status != "failed"]
-    agree = [d for d in answered if d.choice == expected[d.merchant][0]]
-    used = [d for d in answered if d.status == "ok"]
-    used_agree = [d for d in used if d.choice == expected[d.merchant][0]]
+    answered = {m: a for m, a in answers.items() if a.outcome != "failed"}
+    agree = [m for m, a in answered.items() if a.choice == rule[m]]
+    used = {m: a for m, a in answered.items() if a.outcome == "confident"}
+    used_agree = [m for m, a in used.items() if a.choice == rule[m]]
 
     print(f"\nAgreement with rules: {len(agree)}/{len(answered)} answered merchants")
     print(
-        f"Confident answers only (status ok, what an import would keep): "
+        f"Confident answers only (what an import would keep): "
         f"{len(used_agree)}/{len(used)}"
     )
-    status = Counter(d.status for d in decisions)
-    print("Status: " + ", ".join(f"{s} {n}" for s, n in status.most_common()))
+    outcomes = Counter(a.outcome for a in answers.values())
+    print("Outcome: " + ", ".join(f"{s} {n}" for s, n in outcomes.most_common()))
 
     print("\nBy rule category        agree / total")
     per_cat: dict[str, list[bool]] = {}
-    for d in answered:
-        per_cat.setdefault(expected[d.merchant][0], []).append(
-            d.choice == expected[d.merchant][0]
-        )
+    for m, a in answered.items():
+        per_cat.setdefault(rule[m], []).append(a.choice == rule[m])
     for cat, hits in sorted(per_cat.items(), key=lambda kv: -len(kv[1])):
         print(f"  {cat:<20} {sum(hits):>5} / {len(hits)}")
 
-    misses = [d for d in answered if d.choice != expected[d.merchant][0]]
+    misses = {m: a for m, a in answered.items() if a.choice != rule[m]}
     if misses:
         print("\nDisagreements (rule -> Jev, confidence)")
-        for d in sorted(misses, key=lambda d: -(d.confidence or 0)):
+        for m, a in sorted(misses.items(), key=lambda kv: -kv[1].confidence):
             print(
-                f"  {d.merchant:<28} {expected[d.merchant][0]} -> {d.choice} "
-                f"({d.confidence:.2f}, {d.status})"
+                f"  {m:<28} {rule[m]} -> {a.choice} ({a.confidence:.2f}, {a.outcome})"
             )
 
-    latencies = [d.latency_ms for d in decisions]
+    latencies = [a.latency_ms for a in answers.values()]
     print(
         f"\nLatency per request: p50 {statistics.median(latencies):.0f} ms, "
         f"p95 {percentile(latencies, 95):.0f} ms, max {max(latencies):.0f} ms"
     )
-    print(f"Wall time for {len(decisions)} requests: {wall:.1f}s")
+    print(f"Wall time for {len(answers)} requests: {wall:.1f}s")
 
     if not args.no_save:
-        db.record_decisions(conn, [d._asdict() for d in decisions], run="eval")
+        db.save_evals(conn, answers, rule)
         conn.commit()
-        print("Saved to jev_decisions (run = 'eval').")
+        print("Saved to jev_evals.")
 
 
 if __name__ == "__main__":
