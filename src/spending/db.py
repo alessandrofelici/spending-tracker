@@ -143,13 +143,13 @@ def set_merchant_category(
     return cur.rowcount
 
 
-def place_fallback(conn: sqlite3.Connection, merchant: str, category: str) -> int:
-    """Give a merchant's uncategorized rows the LLM's category (never touches rows
-    you or a rule decided)."""
+def place_by_llm(conn: sqlite3.Connection, merchant: str, category: str) -> int:
+    """Give a merchant the LLM's category on every row the LLM (or nobody)
+    decided; rows you or a rule decided are never touched."""
     remember(conn, merchant, category, "llm")
     cur = conn.execute(
         "UPDATE transactions SET category = ?, source = 'llm'"
-        " WHERE merchant = ? AND source = 'fallback'",
+        " WHERE merchant = ? AND source NOT IN ('manual', 'rule')",
         (category, merchant),
     )
     return cur.rowcount

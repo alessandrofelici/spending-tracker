@@ -97,12 +97,14 @@ def cmd_review(args) -> None:
 
 def resort(conn, categories: list[str], new: str | None = None) -> None:
     """Ask Jev again now that the categories changed. Confident answers for
-    uncategorized merchants are applied; moves into `new` from anywhere else
-    (including your own choices) are proposed for you to confirm. Merchants a
-    keyword rule matched are never sent."""
+    uncategorized merchants are applied, and so are confident moves into `new`
+    for merchants Jev had categorized itself (it picked without `new` before).
+    Moves of merchants you set by hand are only proposed. Merchants a keyword
+    rule matched are never sent."""
     merchants = conn.execute(
         """SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s,
-                  MIN(category) category, MIN(source = 'fallback') fallback
+                  MIN(category) category, MIN(source = 'fallback') fallback,
+                  MAX(source = 'manual') manual
            FROM transactions GROUP BY merchant
            HAVING MAX(source = 'rule') = 0 ORDER BY s DESC"""
     ).fetchall()
@@ -130,18 +132,22 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
         conn.commit()
         answers = db.get_answers(conn)
 
-    placed, left, to_confirm, kept = [], [], [], 0
+    placed, left, moved, to_confirm, kept = [], [], [], [], 0
     for m in merchants:
         a = answers.get(m["merchant"])
         sure = a is not None and a["outcome"] == "confident" and a["asked_with"] == key
         if m["fallback"]:
             if sure:
-                db.place_fallback(conn, m["merchant"], a["choice"])
+                db.place_by_llm(conn, m["merchant"], a["choice"])
                 placed.append(f"    {m['d']} -> {a['choice']}")
             else:
                 left.append(m)
         elif sure and new and a["choice"] == new and m["category"] != new:
-            to_confirm.append(m)
+            if m["manual"]:
+                to_confirm.append(m)
+            else:
+                db.place_by_llm(conn, m["merchant"], new)
+                moved.append(f"    {m['d']} ({m['category']}) -> {new}")
         else:
             kept += 1
     conn.commit()
@@ -161,9 +167,18 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
         )
         print(f"  {len(left)} still '{FALLBACK}' ({why}); review below")
     if new:
-        print(f"Already categorized: {len(to_confirm) + kept} merchant(s)")
+        total = len(moved) + len(to_confirm) + kept
+        print(f"Already categorized: {total} merchant(s)")
+        if moved:
+            print(
+                f"  {len(moved)} moved by Jev (it picked them before '{new}' existed):"
+            )
+            print("\n".join(moved))
         if to_confirm:
-            print(f"  {len(to_confirm)} Jev thinks belong in '{new}'; confirm below")
+            print(
+                f"  {len(to_confirm)} you set by hand that Jev thinks belong in"
+                f" '{new}'; confirm below"
+            )
         if kept:
             print(f"  {kept} keep their category")
     if to_confirm or left:
@@ -182,11 +197,13 @@ def review_merchants(conn, categories: list[str], merchants: list) -> None:
         " there is none), + = new category, s = skip, q = quit.\n"
     )
     for m in merchants:
-        current = conn.execute(
-            "SELECT category FROM transactions WHERE merchant = ? LIMIT 1",
+        current, source = conn.execute(
+            "SELECT category, source FROM transactions WHERE merchant = ? LIMIT 1",
             (m["merchant"],),
-        ).fetchone()[0]
+        ).fetchone()
         suggestion, note = _suggest(answers.get(m["merchant"]), categories, current)
+        if source == "manual":
+            note = f" (set by you){note}"
         default = f" [{suggestion}]" if suggestion else ""
         prompt = (
             f"{m['d']}  ({m['n']}x, ${m['s']:.2f}, now: {current}{note}){default} > "
