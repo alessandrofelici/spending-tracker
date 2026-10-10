@@ -26,7 +26,7 @@ uv run spend review
 uv run spend dashboard
 ```
 
-`categories.toml` is yours: it's git-ignored, so the categories, descriptions and keyword rules you add (by hand or with `+` in `spend review`) never end up in git. Before your first import, look through it: drop categories you don't need, add ones you do, and put the stores you shop at in `[rules]`. The example's rules use generic keywords (national chains, `TRANSIT`, `HOSPITAL`, `UNIVERSITY`), so add the local stores, utilities and transit you actually pay.
+`categories.toml` is yours: it's git-ignored, so the categories and descriptions you add (by hand or with `+` in `spend review`) never end up in git. Before your first import, look through it: drop categories you don't need, add ones you do, and make the `[descriptions]` say what belongs in each, since that's what Jev reads. Its `[rules]` don't categorize anything; they're example labels for [checking Jev](#checking-jev-against-keyword-rules).
 
 
 ## Commands
@@ -56,7 +56,7 @@ uv run spend import FILE [FILE ...] [--dry-run] [--no-llm]
 | Option | Effect |
 |---|---|
 | `--dry-run` | Print every row with its category and source; save nothing. It **still asks the LLM** about new merchants (answers aren't remembered), so combine with `--no-llm` for a fully offline preview. |
-| `--no-llm` | Use only your choices, rules and remembered merchants. Unknown merchants become `Other`. Nothing leaves your machine. |
+| `--no-llm` | Use only your choices and remembered merchants. Unknown merchants become `Other`. Nothing leaves your machine. |
 
 ```
 $ uv run spend import statements/oct.csv
@@ -109,7 +109,7 @@ When a merchant doesn't fit any category, type `+` (or `+Pets`) at its prompt. Y
 
 Then everything is **re-sorted** with the new category, because Jev's earlier answers were picked without it:
 
-1. Jev is asked again about every merchant a keyword rule didn't match. Rule matches, including payments, are never sent.
+1. Jev is asked again about every merchant except card payments and refunds, which are never sent.
 2. Merchants still in `Other` that Jev now confidently puts in the **new** category are moved right away, and listed. If Jev now confidently picks an **existing** category for one, it isn't moved: that pick becomes its `[suggestion]` in review. (Adding a category shifts Jev's confidence across all of them, so these are often borderline.)
 3. Merchants **Jev** had put in another category that it now confidently puts in the **new** one are moved too, and listed. Jev picked their old category before the new one existed, so this only replaces its own answer.
 4. Merchants **you** set by hand that Jev thinks belong in the new category are shown for you to confirm (their prompt says `set by you`). Enter accepts the move. Jev never moves your choices on its own, and it doesn't reshuffle merchants between categories that already existed.
@@ -196,10 +196,10 @@ Starts a local Streamlit app and opens it in your browser (stop with Ctrl+C). It
 
 **Categorization:** how your transactions got their categories (all months):
 
-- the share decided by keyword rules, Jev, you, or still needing review, by transactions, merchants and dollars
+- the share decided by Jev, you, or still needing review, by transactions, merchants and dollars (plus keyword rules, for rows imported before rules stopped categorizing)
 - why merchants need review (Jev unsure, Jev picked Other, request failed)
 - Jev's confidence distribution against `JEV_MIN_CONFIDENCE`
-- the latest [agreement check](#checking-jev-against-your-rules) against your keyword rules
+- the latest [agreement check](#checking-jev-against-keyword-rules) against the example keyword rules
 - how long a typical month takes with Jev (measured) vs a chat LLM (estimated; see `documents/jev-review.md`)
 
 ## The monthly cycle
@@ -213,11 +213,10 @@ flowchart TD
     D --> E
     E --> F{"Something looks<br/>miscategorized?"}
     F -- "one merchant" --> G["spend set MERCHANT CATEGORY"]
-    F -- "a pattern<br/>(e.g. every 'CAFE')" --> H["Add a keyword rule<br/>to categories.toml"]
+    F -- "a pattern<br/>(e.g. every 'CAFE')" --> H["spend set CAFE CATEGORY<br/>--all-matches"]
     F -- no --> I["Done until next month"]
     G --> E
-    H --> J["Fix existing rows:<br/>spend set ... --all-matches"]
-    J --> E
+    H --> E
 ```
 
 In practice, monthly:
@@ -226,20 +225,17 @@ In practice, monthly:
 2. **`spend import statements/<file>.csv`**: usually only a handful of new merchants go to the LLM.
 3. **`spend review`** if the import says anything couldn't be categorized.
 4. **`spend dashboard`** to look at the month.
-5. **Correct** anything wrong with `spend set`, or add a rule if it's a pattern. Corrections stick, so each month needs less fixing.
-
-> Rules in `categories.toml` apply to **future** imports. To re-label rows already stored, use `spend set` (with `--all-matches` for a pattern).
+5. **Correct** anything wrong with `spend set` (with `--all-matches` for a pattern). Corrections stick, so each month needs less fixing.
 
 ## How categorization works
 
 Each transaction takes the first answer it gets:
 
 1. **Your manual choices** from `review` / `set` take priority.
-2. **Keyword rules** in `categories.toml`: substring match on the description. Offline and free.
+2. **Card payments and refunds** (`ACH Pmt:<account numbers>`, `HB XFR Pmt`, `Credit Voucher`, ...) go to `Payments & Credits`, matched locally. They never reach the model.
 3. **Merchant memory:** a merchant the LLM already categorized on an earlier import.
 4. **Jev via OpenRouter,** only for merchants never seen before. Jev is TypeSafe's typed decision model: it doesn't write text, it picks one of your categories and returns a probability for each.
    - Only the Description column goes out, with any token containing 3+ digits (account/reference/phone numbers) masked. Amount, balance, draft number, dates and the account line at the top of the export are never sent.
-   - Payment rows (`ACH Pmt:<account numbers>`, `HB XFR Pmt`) and `Credit Voucher` refunds are matched by local rules and never reach the model.
    - Each merchant is its own request, so one odd description can't affect another's answer. Requests run 8 at a time.
    - The answer can only be one of your categories (checked again locally). If Jev's confidence is below `JEV_MIN_CONFIDENCE` (default 0.6), or it picks `Other`, the merchant goes to `spend review` instead of being guessed. Its guess is kept and offered as the default in review, and the merchant isn't asked about again until you change the categories or their descriptions.
    - Requests are restricted to zero-data-retention endpoints (`provider.zdr`).
@@ -252,24 +248,27 @@ The **source** column in the dashboard's transaction table tells you which step 
 | source | Meaning |
 |---|---|
 | `manual` | You set it |
-| `rule` | Keyword rule matched |
+| `payment` | Card payment or refund, matched locally |
 | `memory` | Merchant seen on an earlier import |
 | `llm` | Categorized by Jev (on import, or by a review re-sort) |
 | `fallback` | Needs review |
+| `rule` | Keyword rule matched (only on rows imported before rules stopped categorizing) |
 
-Edit the category list, the `[descriptions]` Jev reads, or the rules in `categories.toml`. Clearer descriptions mean better Jev answers. Rule keywords are case-insensitive substrings, for example:
+Edit the category list or the `[descriptions]` Jev reads in `categories.toml`. Clearer descriptions mean better Jev answers.
 
-```toml
-"Dining" = ["STARBUCKS", "CHIPOTLE", "BLUE OWL"]
-```
-
-### Checking Jev against your rules
+### Checking Jev against keyword rules
 
 ```bash
 uv run python -m spending.jev_eval [--no-save]
 ```
 
-Sends every merchant your keyword rules already categorized to Jev (redacted, same as an import; payment rows stay local) and reports how often Jev agrees, per category, and where it doesn't. A confident disagreement often means a rule is too broad. Answers are saved for the dashboard (skip with `--no-save`) and never change your transactions. It costs about $0.002 for 60 merchants.
+Imports don't use keyword rules. The `[rules]` in `categories.toml` (copied from the example: national chains and generic words like `TRANSIT` or `UNIVERSITY`) are kept only as labels we already trust, to show Jev works. Every stored merchant a rule matches is sent to Jev (redacted, same as an import; payment rows stay local), and the eval reports how often Jev agrees, per category, and where it doesn't. A confident disagreement often means the rule is too broad. Rule keywords are case-insensitive substrings, for example:
+
+```toml
+"Dining" = ["STARBUCKS", "CHIPOTLE", "BLUE OWL"]
+```
+
+Answers are saved for the dashboard (skip with `--no-save`) and never change your transactions. It costs about $0.002 for 60 merchants.
 
 See `documents/jev-review.md` for what Jev is, the latest results, and how it compares with a chat LLM.
 

@@ -151,6 +151,7 @@ with spending_tab:
         width="stretch",
     )
     st.caption(
-        "source: rule = keyword match, memory = seen before, llm = categorized by the model, "
-        "manual = set by you, fallback = needs review (`uv run spend review`)"
+        "source: payment = card payment or refund (never sent), memory = seen before, "
+        "llm = categorized by the model, manual = set by you, "
+        "fallback = needs review (`uv run spend review`), rule = older keyword match"
     )

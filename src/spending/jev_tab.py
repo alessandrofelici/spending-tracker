@@ -1,4 +1,5 @@
-"""Dashboard "Categorization" tab: what Jev decided vs the keyword rules, and how fast.
+"""Dashboard "Categorization" tab: what Jev decided, how well it matches example
+keyword rules, and how fast.
 
 See documents/jev-review.md for how the chat-LLM estimates below were made.
 """
@@ -15,8 +16,10 @@ from spending.db import DB_PATH, connect
 
 # Who decided a transaction's category. Fixed order and colors, shared by every
 # chart on this tab; "Needs review" is the neutral gray, not a series hue.
+# "Keyword rule" only appears for rows imported when rules still categorized.
+LEGACY_RULE = "Keyword rule"
 DECIDER_COLORS = {
-    "Keyword rule": "#2a78d6",
+    LEGACY_RULE: "#2a78d6",
     "Jev": "#eb6834",
     "You (manual)": "#1baf7a",
     "Needs review": "#898781",
@@ -33,7 +36,7 @@ CHAT_MODELS = {
     "Claude 4.5 Haiku, JSON + reasoning": (0.59, 90, 42),
     "Gemini 3.8 Flash (high reasoning)": (24.33, 129, 8),
 }
-MERCHANTS_PER_MONTH = 10  # median new non-rule merchants per month in the real DB
+MERCHANTS_PER_MONTH = 10  # median new non-payment merchants per month in the real DB
 WORKERS = 8
 
 
@@ -56,7 +59,7 @@ def load() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 def decider(row) -> str:
     if row.source == "rule":
-        return "Keyword rule"
+        return LEGACY_RULE
     if row.source == "llm" or (row.source == "memory" and row.memory_source == "llm"):
         return "Jev"
     if row.source in ("manual", "memory"):
@@ -70,6 +73,9 @@ def render() -> None:
         st.info("No transactions yet.")
         return
     txns["decider"] = txns.apply(decider, axis=1)
+    deciders = [
+        d for d in DECIDERS if d != LEGACY_RULE or (txns.decider == LEGACY_RULE).any()
+    ]
 
     st.subheader("Who categorized your spending")
     shares = pd.DataFrame(
@@ -78,10 +84,10 @@ def render() -> None:
             "Merchants": txns.groupby("decider").merchant.nunique(),
             "Dollars": txns[txns.amount > 0].groupby("decider").amount.sum(),
         }
-    ).reindex(DECIDERS, fill_value=0)
+    ).reindex(deciders, fill_value=0)
 
-    cols = st.columns(len(DECIDERS))
-    for col, name in zip(cols, DECIDERS, strict=True):
+    cols = st.columns(len(deciders))
+    for col, name in zip(cols, deciders, strict=True):
         n, total = shares.at[name, "Transactions"], shares["Transactions"].sum()
         col.metric(name, f"{n / total:.0%}", f"{n} transactions", delta_color="off")
 
@@ -98,7 +104,7 @@ def render() -> None:
         color="decider",
         orientation="h",
         category_orders={
-            "decider": DECIDERS,
+            "decider": deciders,
             "measure": ["Transactions", "Merchants", "Dollars"],
         },
         color_discrete_map=DECIDER_COLORS,
@@ -121,7 +127,7 @@ def render() -> None:
     st.plotly_chart(fig, width="stretch")
     st.caption(
         "Jev includes merchants it categorized on an earlier import (source `memory`). "
-        "Card payments and refunds are left out; they're always matched by local rules."
+        "Card payments and refunds are left out; they're matched locally and never sent."
     )
 
     left, right = st.columns(2)
@@ -207,7 +213,12 @@ def render_confidence(answers: pd.DataFrame, evals: pd.DataFrame) -> None:
 
 
 def render_eval(evals: pd.DataFrame) -> None:
-    st.subheader("Does Jev agree with your keyword rules?")
+    st.subheader("Does Jev agree with keyword rules?")
+    st.caption(
+        "Imports don't use keyword rules. The example `[rules]` in categories.toml "
+        "serve as known labels: every merchant they match is sent to Jev, and its "
+        "answer is compared with the rule's."
+    )
     evals = (
         evals[evals.outcome != "failed"]
         .sort_values("evaluated_at")
@@ -215,7 +226,7 @@ def render_eval(evals: pd.DataFrame) -> None:
     )
     if evals.empty:
         st.info(
-            "Run `uv run python -m spending.jev_eval` to compare Jev with your rules."
+            "Run `uv run python -m spending.jev_eval` to compare Jev with the rules."
         )
         return
     evals["agrees"] = evals.choice == evals.rule
@@ -238,7 +249,7 @@ def render_eval(evals: pd.DataFrame) -> None:
         width="stretch",
     )
     c2.caption(
-        "Disagreements. A confident Jev answer here often means a rule is too broad; "
+        "Disagreements. A confident Jev answer here often means the rule is too broad; "
         "outcome `unsure` means an import would have sent it to review instead."
     )
 
