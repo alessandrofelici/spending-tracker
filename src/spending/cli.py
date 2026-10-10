@@ -79,7 +79,7 @@ def cmd_import(args) -> None:
 
 def cmd_review(args) -> None:
     conn = db.connect()
-    categories, _ = load_config()
+    categories = load_config()
     if args.resort is not None:
         new = args.resort or None
         if new is not None and new not in categories:
@@ -101,14 +101,14 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
     uncategorized merchants are applied (with `new`, only answers for `new`; the
     rest become review suggestions), and so are confident moves into `new`
     for merchants Jev had categorized itself (it picked without `new` before).
-    Moves of merchants you set by hand are only proposed. Merchants a keyword
-    rule matched are never sent."""
+    Moves of merchants you set by hand are only proposed. Payment rows are
+    never sent."""
     merchants = conn.execute(
         """SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s,
                   MIN(category) category, MIN(source = 'fallback') fallback,
                   MAX(source = 'manual') manual
            FROM transactions GROUP BY merchant
-           HAVING MAX(source = 'rule') = 0 ORDER BY s DESC"""
+           HAVING MAX(source = 'payment') = 0 ORDER BY s DESC"""
     ).fetchall()
     key = criteria_key(load_criteria(categories))
     answers = db.get_answers(conn)
@@ -226,7 +226,7 @@ def review_merchants(conn, categories: list[str], merchants: list) -> None:
                 conn.commit()
                 print(f"  -> {name} ({n} transactions updated)\n")
                 # Earlier answers were picked without the new category.
-                resort(conn, load_config()[0], name)
+                resort(conn, load_config(), name)
                 return
         if choice is None or choice.lower() == "q":
             break
@@ -284,7 +284,7 @@ def _suggest(answer, categories: list[str], current: str) -> tuple[str | None, s
 
 
 def cmd_set(args) -> None:
-    categories, _ = load_config()
+    categories = load_config()
     if args.category not in categories:
         sys.exit(f"Unknown category. Choose from: {', '.join(categories)}")
     conn = db.connect()
@@ -341,7 +341,9 @@ def main() -> None:
     s = sub.add_parser("import", help="Import MSUFCU transaction CSV(s)")
     s.add_argument("files", nargs="+", type=Path)
     s.add_argument(
-        "--no-llm", action="store_true", help="Only use rules and remembered merchants"
+        "--no-llm",
+        action="store_true",
+        help="Only use your choices and remembered merchants",
     )
     s.add_argument(
         "--dry-run",

@@ -37,7 +37,7 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `statements/` | ✅ | | **In use** | Drop MSUFCU CSV exports here. Holds `l50csvdl.csv` (Jan–Oct 2026). Git-ignored. |
 | `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard` |
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard` |
-| `categories.toml` | ✅ | | **In use** | Each user's own category list, descriptions Jev reads, and keyword rules. Copied from the example at setup; users tweak rules and add categories with `+` in `spend review`. Git-ignored. |
+| `categories.toml` | ✅ | | **In use** | Each user's own category list and the descriptions Jev reads, plus example keyword rules used only by `jev_eval`. Copied from the example at setup; users add categories with `+` in `spend review`. Git-ignored. |
 | `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
 | `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`). Git-ignored. |
 | `src/spending/` | | ✅ | **Active development** | All app code (~1,400 lines) |
@@ -69,7 +69,7 @@ flowchart TB
 
     subgraph SHARED["⚙️ Configuration (user + developer)"]
         direction LR
-        C1["categories.toml<br/>categories + rules"]
+        C1["categories.toml<br/>categories + descriptions"]
         C2[".env<br/>OPENROUTER_KEY"]
     end
 
@@ -103,11 +103,11 @@ flowchart TB
 flowchart LR
     cli["cli.py<br/>entry point: spend"]
     parser["parser.py<br/>CSV → Transaction"]
-    classify["classify.py<br/>manual → rules → memory → Jev"]
+    classify["classify.py<br/>manual → payments → memory → Jev"]
     db["db.py<br/>SQLite schema + queries"]
     dash["dashboard.py<br/>Streamlit + Plotly"]
     jevtab["jev_tab.py<br/>Categorization tab"]
-    jeval["jev_eval.py<br/>Jev vs keyword rules"]
+    jeval["jev_eval.py<br/>Jev vs example keyword rules"]
     toml[("categories.toml")]
     sqlite[("data/spending.db")]
     llm{{"Jev via OpenRouter<br/>typesafe/jev-1.13"}}
@@ -134,8 +134,8 @@ flowchart TD
     A["MSUFCU CSV<br/>statements/*.csv"] --> B["parser.py<br/>skip account line, read Date / Amount / Description,<br/>strip 'Credit Card Ln Adv:'"]
     B --> MC{"Set by you<br/>(review / set)?"}
     MC -- yes --> MN["category (manual)"]
-    MC -- no --> C{"Keyword rule<br/>matches?"}
-    C -- yes --> R["category (rule)"]
+    MC -- no --> C{"Card payment<br/>or refund?"}
+    C -- yes --> R["Payments & Credits<br/>(payment, never sent)"]
     C -- no --> D{"Merchant seen<br/>before?"}
     D -- yes --> M["category (memory)"]
     D -- no --> U{"Jev already unsure<br/>with these categories?"}
@@ -161,7 +161,7 @@ flowchart LR
         direction TB
         a1["Account line<br/>(first line of the export)"]
         a2["Amount · Fee · New Balance<br/>Draft Number · Dates"]
-        a3["Payment rows<br/>ACH Pmt / HB XFR Pmt / Credit Voucher<br/>(matched by local rules)"]
+        a3["Payment rows<br/>ACH Pmt / HB XFR Pmt / Credit Voucher<br/>(matched locally)"]
         a4["data/spending.db"]
     end
     subgraph SENT["🌐 Sent to Jev (OpenRouter, zero data retention)"]
@@ -182,7 +182,7 @@ flowchart LR
     subgraph MVP["MVP (built)"]
         direction TB
         m1["Card CSV<br/>spend import"]:::mvp
-        m2["classify.py<br/>manual → rules → memory → Jev"]:::mvp
+        m2["classify.py<br/>manual → payments → memory → Jev"]:::mvp
         m3[("spending.db<br/>card only")]:::mvp
         m4["Dashboard<br/>spending by category"]:::mvp
         m1 --> m2 --> m3 --> m4
@@ -242,7 +242,7 @@ flowchart LR
     classDef idea fill:#898781,color:#fff,stroke:#52514e
 
     s1["CSV parser"]:::active
-    s2["Rules + Jev categorizer"]:::active
+    s2["Jev categorizer"]:::active
     s3["CLI + dashboard"]:::ready
     s4["First real import<br/>(data/ is empty)"]:::pending
     s5["Initial git commit<br/>(everything untracked)"]:::pending

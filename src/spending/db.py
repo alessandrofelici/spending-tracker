@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     merchant    TEXT NOT NULL,      -- normalized merchant key
     amount      REAL NOT NULL,      -- positive = charge, negative = payment/refund
     category    TEXT NOT NULL,
-    source      TEXT NOT NULL,      -- rule | memory | llm | manual | fallback
+    source      TEXT NOT NULL,      -- payment | memory | llm | manual | fallback (rule: older imports)
     statement   TEXT NOT NULL       -- CSV file it was imported from
 );
 CREATE INDEX IF NOT EXISTS idx_txn_month ON transactions(month);
@@ -50,8 +50,8 @@ CREATE TABLE IF NOT EXISTS jev_answers (
     latency_ms REAL             -- that request, including its retry; NULL if older
 );
 
--- `python -m spending.jev_eval`: Jev's answer for merchants a keyword rule already
--- categorized. Kept apart from jev_answers so it never changes review suggestions.
+-- `python -m spending.jev_eval`: Jev's answer for merchants a keyword rule in
+-- categories.toml matches. Kept apart from jev_answers so it never changes review suggestions.
 CREATE TABLE IF NOT EXISTS jev_evals (
     merchant     TEXT NOT NULL,
     rule         TEXT NOT NULL,   -- the category the keyword rule gave it
@@ -66,6 +66,13 @@ CREATE TABLE IF NOT EXISTS jev_evals (
 # Columns added after a table was first created: (table, column, definition).
 MIGRATIONS = [("jev_answers", "latency_ms", "REAL")]
 
+# Payment rows used to be matched by a keyword rule (source 'rule'); give them
+# their own source so they stay out of Jev now that other rule rows don't.
+DATA_MIGRATIONS = [
+    "UPDATE transactions SET source = 'payment'"
+    " WHERE source = 'rule' AND category = 'Payments & Credits'"
+]
+
 
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +84,9 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
             r["name"] for r in conn.execute(f"PRAGMA table_info({table})")
         }:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    for sql in DATA_MIGRATIONS:
+        conn.execute(sql)
+    conn.commit()
     return conn
 
 
@@ -183,11 +193,11 @@ def set_merchant_category(
 
 def place_by_llm(conn: sqlite3.Connection, merchant: str, category: str) -> int:
     """Give a merchant the LLM's category on every row the LLM (or nobody)
-    decided; rows you or a rule decided are never touched."""
+    decided; rows you set and payment rows are never touched."""
     remember(conn, merchant, category, "llm")
     cur = conn.execute(
         "UPDATE transactions SET category = ?, source = 'llm'"
-        " WHERE merchant = ? AND source NOT IN ('manual', 'rule')",
+        " WHERE merchant = ? AND source NOT IN ('manual', 'payment')",
         (category, merchant),
     )
     return cur.rowcount

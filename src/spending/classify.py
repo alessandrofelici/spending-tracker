@@ -1,4 +1,4 @@
-"""Categorize transactions: your choices -> keyword rules -> remembered merchants -> Jev -> "Other".
+"""Categorize transactions: your choices -> payments -> remembered merchants -> Jev -> "Other".
 
 The model step uses Jev (TypeSafe's typed decision model) through OpenRouter's
 Decisions API. Jev doesn't generate text: it picks one of the categories you
@@ -7,8 +7,8 @@ define and returns a probability for each, so there is nothing to parse.
 Safety measures:
   * Only the merchant description is sent, with any token containing 3+ digits
     (card, account, phone and reference numbers) masked. No amounts, dates, or names.
-  * Payment rows ("ACH Pmt:<account numbers>") are matched by local rules and
-    never reach the model.
+  * Payment rows ("ACH Pmt:<account numbers>") and refunds are matched locally
+    (PAYMENT_MARKERS) and never reach the model.
   * Each unique merchant is sent once, in its own request, and the answer is
     remembered. One hostile description can't influence another's answer.
   * The answer can only be one of your categories (it is checked again locally),
@@ -39,22 +39,39 @@ DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 DEFAULT_MODEL = "typesafe/jev-1.13"
 DEFAULT_MIN_CONFIDENCE = 0.6
 FALLBACK = "Other"
+PAYMENTS = "Payments & Credits"
+# Card payments and refunds: matched locally so they never reach Jev.
+PAYMENT_MARKERS = (
+    "ACH PMT",
+    "XFR PMT",
+    "CREDIT VOUCHER",
+    "PAYMENT - THANK YOU",
+    "PAYMENT THANK YOU",
+    "AUTOPAY",
+    "ONLINE PAYMENT",
+)
 WORKERS = 8
 
 
-def load_config(path: Path = CATEGORIES_PATH) -> tuple[list[str], dict[str, list[str]]]:
+def load_config(path: Path = CATEGORIES_PATH) -> list[str]:
     with open(path, "rb") as f:
-        cfg = tomllib.load(f)
-    categories = cfg["categories"]
-    rules = {cat: [k.upper() for k in kws] for cat, kws in cfg.get("rules", {}).items()}
-    unknown = set(rules) - set(categories)
-    if unknown:
-        raise ValueError(
-            f"Rules reference categories not in the list: {sorted(unknown)}"
-        )
-    if FALLBACK not in categories:
-        categories.append(FALLBACK)
-    return categories, rules
+        categories = tomllib.load(f)["categories"]
+    for required in (PAYMENTS, FALLBACK):
+        if required not in categories:
+            categories.append(required)
+    return categories
+
+
+def load_rules(
+    categories: list[str], path: Path = CATEGORIES_PATH
+) -> dict[str, list[str]]:
+    """The `[rules]` keyword lists, used only by `jev_eval` as labels to check
+    Jev against. Imports never use them. Rules for unknown categories are skipped."""
+    with open(path, "rb") as f:
+        rules = tomllib.load(f).get("rules", {})
+    return {
+        cat: [k.upper() for k in kws] for cat, kws in rules.items() if cat in categories
+    }
 
 
 def add_category(name: str, description: str = "", path: Path = CATEGORIES_PATH) -> str:
@@ -91,6 +108,11 @@ def add_category(name: str, description: str = "", path: Path = CATEGORIES_PATH)
             table.value._insert_at(other, key, description)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return name
+
+
+def is_payment(description: str) -> bool:
+    text = description.upper()
+    return any(k in text for k in PAYMENT_MARKERS)
 
 
 def match_rule(description: str, rules: dict[str, list[str]]) -> str | None:
@@ -237,11 +259,11 @@ def categorize(
     unplaced: Mapping[str, str] | None = None,
 ) -> tuple[list[tuple[str, str]], dict[str, Answer]]:
     """Returns ([(category, source)] aligned with txns, {merchant: Answer} from Jev this run).
-    Order: your manual choices -> keyword rules -> remembered merchants -> LLM -> fallback.
+    Order: your manual choices -> payments -> remembered merchants -> LLM -> fallback.
 
     unplaced: merchant -> criteria_key for merchants Jev already couldn't place.
     They aren't asked again until the categories or their descriptions change."""
-    categories, rules = load_config()
+    categories = load_config()
     key = criteria_key(load_criteria(categories))
     unplaced = unplaced or {}
     txns = list(txns)
@@ -251,8 +273,8 @@ def categorize(
     for t in txns:
         if t.merchant in manual and memory.get(t.merchant) in categories:
             results.append((memory[t.merchant], "manual"))
-        elif cat := match_rule(t.description, rules):
-            results.append((cat, "rule"))
+        elif is_payment(t.description):
+            results.append((PAYMENTS, "payment"))
         elif (cat := memory.get(t.merchant)) in categories:
             results.append((cat, "memory"))
         else:
