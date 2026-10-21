@@ -10,19 +10,17 @@ from .classify import (
     CATEGORIES_PATH,
     FALLBACK,
     add_category,
-    categorize,
     classify_with_llm,
-    confident,
     criteria_key,
     load_config,
     load_criteria,
 )
 from .parser import parse_csv, transaction_ids
+from .pipeline import categorize_rows, save_rows
 
 
 def cmd_import(args) -> None:
     conn = db.connect()
-    memory = db.get_memory(conn)
     for path in args.files:
         print(f"{path.name}:")
         txns = parse_csv(path)
@@ -30,29 +28,9 @@ def cmd_import(args) -> None:
             print("  No transactions found. Is this an MSUFCU transactions CSV?")
             continue
 
-        results, answers = categorize(
-            txns,
-            memory,
-            use_llm=not args.no_llm,
-            manual=db.get_manual_merchants(conn),
-            unplaced=db.get_unplaced(conn),
+        rows, answers = categorize_rows(
+            conn, txns, transaction_ids(txns), path.name, use_llm=not args.no_llm
         )
-        rows = [
-            {
-                "id": tid,
-                "month": t.month,
-                "date": t.date.isoformat(),
-                "description": t.description,
-                "merchant": t.merchant,
-                "amount": t.amount,
-                "category": cat,
-                "source": src,
-                "statement": path.name,
-            }
-            for tid, t, (cat, src) in zip(
-                transaction_ids(txns), txns, results, strict=True
-            )
-        ]
 
         if args.dry_run:
             for r in rows:
@@ -61,12 +39,7 @@ def cmd_import(args) -> None:
                 )
             continue
 
-        learned = confident(answers)
-        for merchant, cat in learned.items():
-            db.remember(conn, merchant, cat, "llm")
-        memory.update(learned)
-        db.save_answers(conn, answers)
-        added = db.insert_transactions(conn, rows)
+        added = save_rows(conn, rows, answers)
         conn.commit()
         months = sorted({r["month"] for r in rows})
         flagged = sum(r["source"] == "fallback" for r in rows)
