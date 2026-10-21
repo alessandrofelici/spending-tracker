@@ -43,6 +43,7 @@ PAYMENTS = "Payments & Credits"
 # Card payments and refunds: matched locally so they never reach Jev.
 PAYMENT_MARKERS = (
     "ACH PMT",
+    "ACH LOAN PAYMENT",  # a card payment as MSUFCU words it through Plaid
     "XFR PMT",
     "CREDIT VOUCHER",
     "PAYMENT - THANK YOU",
