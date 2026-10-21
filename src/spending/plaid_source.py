@@ -154,6 +154,11 @@ class Plaid:
         data = self._post("/item/public_token/exchange", {"public_token": public_token})
         return data["access_token"], data["item_id"]
 
+    def remove(self, access_token: str) -> None:
+        """Revoke a bank login: its access token stops working and billing ends.
+        Some OAuth banks still list the app in their own settings afterwards."""
+        self._post("/item/remove", {"access_token": access_token})
+
     def changes(self, access_token: str, cursor: str | None) -> Changes:
         """Everything that changed since cursor, following has_more to the end."""
         for _attempt in range(3):
@@ -238,18 +243,48 @@ def _write_tokens(tokens: dict[str, str]) -> None:
 
 def link(
     conn: sqlite3.Connection, plaid: Plaid, public_token: str, institution: str | None
-) -> str:
+) -> tuple[str, list[str]]:
     """Finish signing in: swap Link's public token for an access token, store it
-    and record the bank login, replacing any earlier one (one bank for now).
-    Returns where the token was stored."""
+    and record the bank login, then revoke any earlier one (one bank for now).
+    Returns where the token was stored, and a sentence for each earlier login
+    that couldn't be revoked at Plaid."""
     access_token, item_id = plaid.exchange(public_token)
-    for old in db.get_plaid_items(conn):
-        delete_token(old["item_id"])
-        db.remove_plaid_item(conn, old["item_id"])
     where = save_token(item_id, access_token)
     db.add_plaid_item(conn, item_id, institution)
-    conn.commit()
-    return where
+    conn.commit()  # the new login is safe before the old ones are touched
+    problems = []
+    for old in db.get_plaid_items(conn)[1:]:
+        name = old["institution"] or "the earlier bank login"
+        try:
+            if not unlink(conn, plaid, old["item_id"]):
+                problems.append(
+                    f"The token for {name} was missing, so Plaid couldn't revoke it:"
+                    " remove the app in your bank's connected-apps settings."
+                )
+        except (PlaidError, httpx.HTTPError) as e:
+            problems.append(
+                f"Couldn't revoke {name} at Plaid ({e}); the dashboard tries again"
+                " each time it opens."
+            )
+        conn.commit()
+    return where, problems
+
+
+def unlink(conn: sqlite3.Connection, plaid: Plaid, item_id: str) -> bool:
+    """Revoke a bank login at Plaid, then forget it here; its transactions stay.
+    Returns False when no token was stored, so Plaid couldn't be asked and the
+    login may still be active there. Raises if Plaid can't revoke it, keeping
+    everything so it can be retried. The caller commits."""
+    token = load_token(item_id)
+    if token:
+        try:
+            plaid.remove(token)
+        except PlaidError as e:
+            if e.code not in LOGIN_GONE:  # already gone at Plaid: nothing to revoke
+                raise
+    delete_token(item_id)
+    db.remove_plaid_item(conn, item_id)
+    return token is not None
 
 
 _lock = threading.Lock()  # Streamlit runs each browser tab in its own thread

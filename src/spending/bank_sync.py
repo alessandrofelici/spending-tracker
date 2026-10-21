@@ -7,6 +7,7 @@ app. Link hands back a one-time public token, which is swapped for the access
 token in Python; the access token itself never goes to the browser.
 """
 
+import contextlib
 import sqlite3
 import time
 import uuid
@@ -67,9 +68,11 @@ def render() -> str:
         return "error"
 
     with db.connect() as conn:
-        item = next(iter(db.get_plaid_items(conn)), None)
+        items = db.get_plaid_items(conn)  # newest first
+        item = items[0] if items else None
         token = plaid_source.load_token(item["item_id"]) if item else None
         if "bank" not in st.session_state:  # the app just opened
+            _revoke_leftovers(conn, plaid, items[1:])
             st.session_state.bank = _sync(
                 conn, plaid, item, token, st.session_state.pop("just_linked", False)
             )
@@ -77,6 +80,16 @@ def render() -> str:
     bank = st.session_state.bank
     _show(plaid, item, token, bank)
     return bank["state"]
+
+
+def _revoke_leftovers(
+    conn: sqlite3.Connection, plaid: Plaid, old_items: list[sqlite3.Row]
+) -> None:
+    """Retry revoking logins a sign-in replaced but couldn't revoke at the time."""
+    for old in old_items:
+        with contextlib.suppress(PlaidError, httpx.HTTPError):
+            plaid_source.unlink(conn, plaid, old["item_id"])
+            conn.commit()
 
 
 def _sync(
@@ -210,7 +223,7 @@ def _finish_sign_in(conn: sqlite3.Connection, plaid: Plaid) -> None:
         # Update mode keeps the same login and token, so there's nothing to swap.
         if not link["update"]:
             try:
-                where = plaid_source.link(
+                where, problems = plaid_source.link(
                     conn,
                     plaid,
                     result.success["public_token"],
@@ -222,9 +235,12 @@ def _finish_sign_in(conn: sqlite3.Connection, plaid: Plaid) -> None:
                     "message": f"Signing in didn't finish: {e}",
                 }
                 st.rerun()
-            st.session_state.signed_in_note = (
-                f"Connected to {result.success['institution'] or 'your bank'}."
-                f" The sign-in token is kept in {where}."
+            st.session_state.signed_in_note = " ".join(
+                [
+                    f"Connected to {result.success['institution'] or 'your bank'}.",
+                    f"The sign-in token is kept in {where}.",
+                    *problems,
+                ]
             )
         st.session_state.just_linked = True
         del st.session_state.bank  # sync again on the next run

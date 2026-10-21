@@ -5,7 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import db
+import httpx
+
+from . import db, plaid_source
 from .classify import (
     CATEGORIES_PATH,
     FALLBACK,
@@ -305,6 +307,47 @@ def cmd_dashboard(args) -> None:
     subprocess.run([sys.executable, "-m", "streamlit", "run", str(app)], check=False)
 
 
+def cmd_unlink(args) -> None:
+    """Revoke the bank connection at Plaid and delete its token. Transactions stay."""
+    plaid = plaid_source.Plaid.from_env()
+    if plaid is None:
+        sys.exit(
+            "Bank sync isn't set up: PLAID_CLIENT_ID and PLAID_SECRET aren't in .env."
+        )
+    conn = db.connect()
+    items = db.get_plaid_items(conn)
+    if not items:
+        print("No bank is connected.")
+        return
+    names = ", ".join(i["institution"] or "your bank" for i in items)
+    print(
+        f"This revokes the app's access to {names} at Plaid and deletes the token."
+        " Synced transactions stay. Connecting again later is a new connection:"
+        " one of the 10 on Plaid's Trial plan."
+    )
+    if (_ask("Disconnect? [y/N] ") or "").lower() != "y":
+        print("Nothing changed.")
+        return
+    for item in items:
+        name = item["institution"] or "your bank"
+        try:
+            revoked = plaid_source.unlink(conn, plaid, item["item_id"])
+        except (plaid_source.PlaidError, httpx.HTTPError) as e:
+            sys.exit(
+                f"Couldn't revoke {name} at Plaid: {e}\nIt's still connected; try again later."
+            )
+        conn.commit()
+        print(
+            f"Disconnected {name}."
+            if revoked
+            else f"Forgot {name}, but its token was missing, so Plaid couldn't revoke it."
+        )
+    print(
+        "Your bank may still list the app as connected (some OAuth banks do);"
+        " remove it in the bank's connected-apps settings too."
+    )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="spend", description="Credit card spending tracker"
@@ -357,6 +400,11 @@ def main() -> None:
 
     s = sub.add_parser("dashboard", help="Open the charts dashboard")
     s.set_defaults(func=cmd_dashboard)
+
+    s = sub.add_parser(
+        "unlink", help="Disconnect your bank: revoke Plaid's access, delete the token"
+    )
+    s.set_defaults(func=cmd_unlink)
 
     args = p.parse_args()
     # categories.toml is each user's own copy (git-ignored), made at setup.

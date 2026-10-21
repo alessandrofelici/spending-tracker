@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (
     item_id     TEXT PRIMARY KEY,
     institution TEXT,   -- bank name from Plaid Link
     cursor      TEXT,   -- where the last /transactions/sync stopped; NULL = never synced
-    cutover     TEXT,   -- newest CSV-imported date when linked; Plaid rows up to it are skipped
+    cutover     TEXT,   -- newest stored date when linked; Plaid rows up to it are skipped
     last_synced TEXT    -- UTC, YYYY-MM-DD HH:MM:SS
 );
 
@@ -216,24 +216,21 @@ def delete_plaid_transactions(conn: sqlite3.Connection, ids: list[str]) -> int:
     return conn.total_changes - before
 
 
-def last_csv_date(conn: sqlite3.Connection) -> str | None:
-    return conn.execute(
-        "SELECT MAX(date) FROM transactions WHERE source_kind = 'csv'"
-    ).fetchone()[0]
-
-
 def get_plaid_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT * FROM plaid_items").fetchall()
+    """Newest first: that's the login the dashboard syncs."""
+    return conn.execute("SELECT * FROM plaid_items ORDER BY rowid DESC").fetchall()
 
 
 def add_plaid_item(
     conn: sqlite3.Connection, item_id: str, institution: str | None
 ) -> None:
-    """A new bank login. Plaid rows dated up to the newest CSV-imported one are
-    skipped, so history you already imported isn't counted twice."""
+    """A new bank login. Plaid rows dated up to the newest stored transaction are
+    skipped, so nothing you already have is counted twice: CSV imports, or rows
+    synced through an earlier login (a new login's transaction ids differ)."""
     conn.execute(
-        "INSERT INTO plaid_items (item_id, institution, cutover) VALUES (?, ?, ?)",
-        (item_id, institution, last_csv_date(conn)),
+        """INSERT INTO plaid_items (item_id, institution, cutover)
+           VALUES (?, ?, (SELECT MAX(date) FROM transactions))""",
+        (item_id, institution),
     )
 
 
