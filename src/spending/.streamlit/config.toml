@@ -1,0 +1,11 @@
+# Streamlit settings for the dashboard. A config next to the script applies
+# however it's started (`spend dashboard`, `streamlit run`, the app window) and
+# from any folder. Command-line flags and STREAMLIT_* variables still override it.
+
+[server]
+# Only this machine can connect. Streamlit's default is every network interface,
+# which WSL's mirrored networking puts on the LAN.
+address = "127.0.0.1"
+# Refuse any other hostname, so a web page can't reach the dashboard by pointing
+# its own domain at 127.0.0.1 (DNS rebinding).
+allowedHosts = ["localhost", "127.0.0.1"]
