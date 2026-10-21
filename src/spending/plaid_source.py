@@ -233,7 +233,7 @@ def _read_tokens() -> dict[str, str]:
 
 
 def _write_tokens(tokens: dict[str, str]) -> None:
-    TOKENS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TOKENS_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Created owner-only, so the token is never readable by others, not even briefly.
     fd = os.open(TOKENS_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
