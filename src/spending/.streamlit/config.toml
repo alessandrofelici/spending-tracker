@@ -9,3 +9,8 @@ address = "127.0.0.1"
 # Refuse any other hostname, so a web page can't reach the dashboard by pointing
 # its own domain at 127.0.0.1 (DNS rebinding).
 allowedHosts = ["localhost", "127.0.0.1"]
+
+[browser]
+# Don't send Streamlit's usage statistics: the README promises that only
+# redacted merchant names leave the machine.
+gatherUsageStats = false
