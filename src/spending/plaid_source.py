@@ -2,8 +2,8 @@
 
 The dashboard calls sync() when it opens: /transactions/sync returns what changed
 at the bank since the last call, and new rows go through the same categorize ->
-store steps as `spend import`, so your choices, rules, remembered merchants and
-Jev all apply.
+store steps as `spend import`, so your choices, the payment check, remembered
+merchants and Jev all apply.
 
 Safety measures:
   * PLAID_CLIENT_ID and PLAID_SECRET stay in .env. The access token Plaid issues
@@ -13,12 +13,15 @@ Safety measures:
   * Only credit accounts are stored (the card, or a credit line). Checking and
     savings would double count card payments (documents/checking-ideas.md).
   * Pending transactions are skipped: they can still change amount or disappear.
-  * Jev sees what it sees on a CSV import: one redacted description per new merchant.
+  * Jev sees what it sees on a CSV import: one redacted description per new
+    merchant. The bank's wrapper around the merchant, which includes the date,
+    is removed first (WRAPPER_RE).
 """
 
 import contextlib
 import json
 import os
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -46,6 +49,13 @@ DAYS_REQUESTED = 730
 SIGN_IN_AGAIN = {"ITEM_LOGIN_REQUIRED", "PASSWORD_RESET_REQUIRED", "ACCESS_NOT_GRANTED"}
 # The bank login no longer exists at Plaid; only a new one helps.
 LOGIN_GONE = {"ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"}
+# MSUFCU's descriptions through Plaid wrap what the CSV export shows:
+#   Credit Card Advance <merchant> Date MM/DD/YY <reference> <nnnn> Card #<last 4>
+# Removing the wrapper makes them match the CSV, so remembered merchants and your
+# choices carry over, and the date never reaches Jev (redact() keeps 2-digit runs).
+WRAPPER_RE = re.compile(
+    r"^Credit Card Advance\s+|\s+Date\s+\d{1,2}/\d{1,2}/\d{2,4}\b.*$", re.IGNORECASE
+)
 
 
 class PlaidError(Exception):
@@ -165,8 +175,8 @@ class Plaid:
             body: dict = {
                 "access_token": access_token,
                 "count": 500,
-                # The bank's own description, the closest to the CSV export, so
-                # keyword rules and remembered merchants keep matching.
+                # The bank's own description: unwrapped, it matches the CSV
+                # export, so remembered merchants and the payment check apply.
                 "options": {"include_original_description": True},
             }
             if out.cursor:
@@ -308,7 +318,8 @@ def _is_credit(account: dict) -> bool:
 def _transaction(t: dict) -> Transaction | None:
     """A Plaid transaction as the CSV parser would have read it, or None where an
     import would skip it (no amount or no description)."""
-    desc = clean_description(t.get("original_description") or t.get("name") or "")
+    raw = t.get("original_description") or t.get("name") or ""
+    desc = clean_description(WRAPPER_RE.sub("", raw))
     amount = float(t["amount"])  # Plaid's sign matches ours: positive = money out
     if amount == 0 or not desc:
         return None
