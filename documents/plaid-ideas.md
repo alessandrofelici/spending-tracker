@@ -1,7 +1,26 @@
 # Plaid Ideas
 
-> **Status:** Proposal ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)), separate from the MVP (CSV import). Nothing here is built yet.
+> **Status:** MVP built ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)): the dashboard syncs when it opens and signs in through Plaid Link. Tested against a fake Plaid server, not yet a real bank. See [What the MVP does](#what-the-mvp-does); the rest of this doc is the original design.
 > **Goal:** Replace the manual "download CSV → `spend import`" step with an automatic monthly pull of transactions.
+
+## What the MVP does
+
+- **On open:** `spend dashboard` calls `/transactions/sync` once per browser session (`bank_sync.py` → `plaid_source.py`). New rows go through `pipeline.py`, the same categorize → store path as `spend import`. Then the chart cache is cleared and a caption says what changed.
+- **Not signed in:** a "Connect your bank" card opens Plaid Link through an `st.components.v2` component. It isn't sandboxed, so Link's overlay and the bank's OAuth pop-up work, and no redirect URI is needed on desktop web. Link's public token comes back to Python and is exchanged there.
+- **Sign in again:** `ITEM_LOGIN_REQUIRED` (also `PASSWORD_RESET_REQUIRED`, `ACCESS_NOT_GRANTED`) opens Link in update mode, which keeps the same Item. On the Trial plan the 10 Items are a lifetime count: `/item/remove` doesn't free a slot ([billing docs](https://plaid.com/docs/account/billing/)).
+- Without `PLAID_CLIENT_ID` / `PLAID_SECRET` in `.env`, nothing changes: CSV only.
+
+Where it differs from the design below:
+
+| Design | MVP | Why |
+|---|---|---|
+| `spend link` / `sync` / `unlink`, scheduler | Link and sync live in the dashboard | Sync on open is what makes the data current; the CLI and a schedule can come later |
+| `external_id` and `account` columns | `id` holds Plaid's `transaction_id`; no `account` column | Only credit accounts are stored: type `credit`, or `loan` / `line of credit` in case MSUFCU reports the card that way |
+| Access token in the OS keyring | Keyring, falling back to `data/plaid-tokens.json` (created 0600) | WSL has no Secret Service, so the keyring alone wouldn't work on the dev machine |
+| Cutover = last CSV date | Same, fixed when the bank is linked (`plaid_items.cutover`) | Predictable: later CSV imports don't move it |
+| Plaid category step | Not yet | Rules, memory and Jev handle it; descriptions use `original_description` so CSV-built rules and memory keep matching |
+
+Still open: the PFC step, `spend sync` / `unlink`, a schedule, and a first real MSUFCU link, which also settles whether the credit line shows up.
 
 ## Automation
 - Retrieve statement monthly
@@ -153,7 +172,7 @@ Scheduling: a `systemd --user` timer or crontab entry running `uv run spend sync
 
 - [ ] Does MSUFCU expose the credit line through Plaid, or only share/checking accounts?
 - [ ] How long does MSUFCU's OAuth consent last before it needs re-linking?
-- [ ] Are the Trial plan limits enough long term (10 Items; check for request caps)?
+- [x] Are the Trial plan limits enough long term (10 Items; check for request caps)? Yes for one bank. Plaid documents no request cap or expiry for Trial (the per-product call cap belonged to the retired Limited Production plan), but the 10 Items are lifetime, so re-authentication goes through update mode instead of a new link.
 - [ ] Should Plaid replace CSV import entirely, or should CSV stay as a fallback? (Recommend keeping it: no account, no third party.)
 
 ## Sources

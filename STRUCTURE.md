@@ -16,13 +16,16 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 ├── 󰣞 src
 │   └──  spending
 │       ├──  __init__.py
+│       ├──  bank_sync.py
 │       ├──  classify.py
 │       ├──  cli.py
 │       ├──  dashboard.py
 │       ├──  db.py
 │       ├──  jev_eval.py
 │       ├──  jev_tab.py
-│       └──  parser.py
+│       ├──  parser.py
+│       ├──  pipeline.py
+│       └──  plaid_source.py
 ├──  statements
 │   └──  l50csvdl.csv
 ├──  STRUCTURE.md
@@ -36,18 +39,18 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 |---|:-:|:-:|---|---|
 | `statements/` | ✅ | | **In use** | Drop MSUFCU CSV exports here. Holds `l50csvdl.csv` (Jan–Oct 2026). Git-ignored. |
 | `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard` |
-| Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard` |
+| Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard`. With Plaid set up, it pulls new transactions each time it opens, or asks you to sign in to your bank |
 | `categories.toml` | ✅ | | **In use** | Each user's own category list, descriptions Jev reads, and keyword rules. Copied from the example at setup; users tweak rules and add categories with `+` in `spend review`. Git-ignored. |
 | `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
-| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`). Git-ignored. |
-| `src/spending/` | | ✅ | **Active development** | All app code (~1,400 lines) |
+| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`), plus `plaid_items` (each bank login's sync cursor and CSV cutover date). `plaid-tokens.json` holds the Plaid access token, owner-only, only where there's no OS keyring (e.g. WSL). Git-ignored. |
+| `src/spending/` | | ✅ | **Active development** | All app code (~2,200 lines) |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
 | `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
-| `.env` | | ✅ | Secret | `OPENROUTER_KEY`. Git-ignored. |
+| `.env` | | ✅ | Secret | `OPENROUTER_KEY`; optionally `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` for bank sync. Git-ignored. |
 | `README.md` | ✅ | ✅ | Docs | Usage and how categorization works |
 | `STRUCTURE.md` | | ✅ | Docs | This file |
 | `documents/` | | ✅ | **Planning** | Feature proposals, separate from the MVP (see [Planned features](#planned-features)) |
-| `documents/plaid-ideas.md` | | ✅ | Proposal | Automatic monthly pull via Plaid instead of manual CSV downloads. MSUFCU is supported (Plaid Exchange); free Trial plan covers it. |
+| `documents/plaid-ideas.md` | | ✅ | In progress | Pull transactions via Plaid instead of downloading CSVs. MVP built: the dashboard syncs when it opens and signs in through Plaid Link (tested against a fake Plaid, not yet a real bank). Not yet: Plaid's categories, `spend sync`/`unlink`, a schedule. |
 | `documents/jev-review.md` | | ✅ | Docs | What Jev is, how `classify.py` uses it, agreement eval results, and speed/cost vs a chat LLM (with how it was estimated) |
 | `documents/checking-ideas.md` | | ✅ | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
 | `documents/extend-review.md` | | ✅ | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
@@ -70,17 +73,18 @@ flowchart TB
     subgraph SHARED["⚙️ Configuration (user + developer)"]
         direction LR
         C1["categories.toml<br/>categories + rules"]
-        C2[".env<br/>OPENROUTER_KEY"]
+        C2[".env<br/>OPENROUTER_KEY<br/>PLAID_* (optional)"]
     end
 
     subgraph DEV["🛠️ Developer layer: src/spending/"]
         direction LR
         D1["cli.py"]
         D2["parser.py"]
-        D3["classify.py"]
+        D3["classify.py<br/>+ pipeline.py"]
         D4["db.py"]
         D5["dashboard.py<br/>+ jev_tab.py"]
         D6["jev_eval.py"]
+        D7["bank_sync.py<br/>+ plaid_source.py"]
     end
 
     subgraph STORE["💾 Generated"]
@@ -90,8 +94,11 @@ flowchart TB
     U1 --> U2
     U2 --> D1
     U3 --> D5
+    D5 --> D7
     C1 --> D3
     C2 --> D3
+    C2 --> D7
+    D7 --> D3
     D4 --> S1
     D5 --> S1
     D6 --> S1
@@ -108,31 +115,47 @@ flowchart LR
     dash["dashboard.py<br/>Streamlit + Plotly"]
     jevtab["jev_tab.py<br/>Categorization tab"]
     jeval["jev_eval.py<br/>Jev vs keyword rules"]
+    pipeline["pipeline.py<br/>categorize → store"]
+    banksync["bank_sync.py<br/>sync on open, sign-in"]
+    plaidsrc["plaid_source.py<br/>Plaid client + sync"]
     toml[("categories.toml")]
     sqlite[("data/spending.db")]
     llm{{"Jev via OpenRouter<br/>typesafe/jev-1.13"}}
+    plaid{{"Plaid API<br/>+ Plaid Link in the browser"}}
 
     cli --> parser
+    cli --> pipeline
     cli --> classify
     cli --> db
     cli -. "spend dashboard" .-> dash
+    pipeline --> classify
+    pipeline --> db
     classify --> toml
     classify --> llm
     classify --> db
+    dash --> banksync
     dash --> db
     dash --> jevtab
+    banksync --> plaidsrc
+    plaidsrc --> parser
+    plaidsrc --> pipeline
+    plaidsrc --> plaid
     jevtab --> db
     jeval --> classify
     jeval --> db
     db --> sqlite
 ```
 
-## Import pipeline (what runs on `spend import`)
+## Import pipeline (what runs on `spend import` and on bank sync)
+
+Both sources go through `pipeline.py`, so a row from Plaid is categorized exactly like one from a CSV.
 
 ```mermaid
 flowchart TD
     A["MSUFCU CSV<br/>statements/*.csv"] --> B["parser.py<br/>skip account line, read Date / Amount / Description,<br/>strip 'Credit Card Ln Adv:'"]
+    A2["Plaid /transactions/sync<br/>(when the dashboard opens)"] --> B2["plaid_source.py<br/>credit accounts, posted, after the CSV cutover;<br/>the bank's own description"]
     B --> MC{"Set by you<br/>(review / set)?"}
+    B2 --> MC
     MC -- yes --> MN["category (manual)"]
     MC -- no --> C{"Keyword rule<br/>matches?"}
     C -- yes --> R["category (rule)"]
@@ -146,7 +169,7 @@ flowchart TD
     F -. "every answer:<br/>confidence, outcome, latency" .-> JD[("jev_answers")]
     G -- yes --> L["category (llm)<br/>+ saved to merchant_memory"]
     G -- no --> O["Other (fallback)<br/>guess saved to jev_answers<br/>→ spend review"]
-    MN & R & M & L & O --> H["db.py: INSERT OR IGNORE<br/>deduplicated by hash"]
+    MN & R & M & L & O --> H["db.py: INSERT OR IGNORE<br/>deduplicated by hash or Plaid's transaction id"]
     H --> I[("data/spending.db")]
     I --> J["spend summary / dashboard"]
 ```
@@ -154,6 +177,8 @@ flowchart TD
 ## Privacy boundary
 
 Only the Description column ever leaves the machine, and payment rows never do.
+
+Bank sync adds a different kind of trust: Plaid reads the accounts you share in Plaid Link, at the bank. The app only sends Plaid its keys and the access token, never your data, and it only stores credit-account rows.
 
 ```mermaid
 flowchart LR
@@ -172,7 +197,7 @@ flowchart LR
 
 ## Planned features
 
-Both proposals live in `documents/` and are **not built yet**. They extend the MVP rather than replace it: CSV import stays as the no-third-party fallback.
+Both proposals live in `documents/`. The Plaid one has a working MVP (blue below); the rest of both is **not built yet**. They extend the MVP rather than replace it: CSV import stays as the no-third-party fallback.
 
 ```mermaid
 flowchart LR
@@ -190,10 +215,12 @@ flowchart LR
 
     subgraph PLAID["documents/plaid-ideas.md"]
         direction TB
-        p1["spend link / sync / unlink"]:::plan
-        p2["/transactions/sync<br/>cursor + scheduler"]:::plan
+        p1["Sign in via Plaid Link<br/>in the dashboard"]:::mvp
+        p2["/transactions/sync<br/>on dashboard open"]:::mvp
         p3["Plaid category step<br/>before the LLM"]:::plan
+        p4["spend sync / unlink<br/>+ scheduler"]:::plan
         p1 --> p2
+        p2 --> p4
     end
 
     subgraph CHK["documents/checking-ideas.md"]
@@ -212,18 +239,20 @@ flowchart LR
     c4 -. "new views" .-> m4
 ```
 
-### Proposed changes by file
+### Changes by file
+
+✅ = built (Plaid MVP); the rest is proposed.
 
 | File | Plaid | Checking |
 |---|---|---|
-| `src/spending/cli.py` | `link`, `sync`, `unlink` commands | `import --account`, reconciliation in `review` |
-| `src/spending/parser.py` | New sibling `plaid_source.py` (Plaid → `Transaction`) | Accept checking exports; local rules for income / P2P |
+| `src/spending/cli.py` | `sync`, `unlink` commands (signing in and syncing live in the dashboard) | `import --account`, reconciliation in `review` |
+| `src/spending/parser.py` | ✅ New sibling `plaid_source.py` (Plaid → `Transaction`), via `pipeline.py` like a CSV | Accept checking exports; local rules for income / P2P |
 | `src/spending/classify.py` | Plaid category mapping before the LLM | Never send income or P2P rows to the LLM |
-| `src/spending/db.py` | `source_kind`, `external_id`, `account` columns; `plaid_items` table | `account`, `kind`, `match_id` columns |
-| `src/spending/dashboard.py` | "Last synced" note | Cash flow, savings rate, account filter, reconciliation panel |
+| `src/spending/db.py` | ✅ `source_kind` column, `plaid_items` table (`id` is Plaid's transaction id, so no `external_id`) | `account`, `kind`, `match_id` columns |
+| `src/spending/dashboard.py` | ✅ Sync on open, "Connect your bank" card, last-sync caption (`bank_sync.py`) | Cash flow, savings rate, account filter, reconciliation panel |
 | `categories.toml` | — | Rent & Housing, Investing, Income, Transfers, People (P2P) |
 | New: `payees.toml` | — | Local payee → category map for Zelle/Venmo/checks |
-| `.env` / OS keyring | `PLAID_CLIENT_ID`, `PLAID_SECRET` in `.env`; `access_token` in keyring | — |
+| `.env` / OS keyring | ✅ `PLAID_*` in `.env`; `access_token` in the keyring, or `data/plaid-tokens.json` (0600) where there's none | — |
 
 ### Open questions blocking each
 
