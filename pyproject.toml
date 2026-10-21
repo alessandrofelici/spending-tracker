@@ -8,8 +8,12 @@ dependencies = [
     "python-dotenv>=1.0",
     "pandas>=2.2",
     "plotly>=5.22",
-    "streamlit>=1.38",
+    # 1.64 keeps a component's trigger value until Python reads it; the Plaid
+    # sign-in hands its result back that way.
+    "streamlit>=1.64",
     "tomlkit>=0.15.1",
+    # Where the Plaid access token is stored (falls back to a private file).
+    "keyring>=25",
 ]
 
 [project.scripts]
