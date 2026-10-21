@@ -206,7 +206,7 @@ Starts a local Streamlit app and opens it in your browser (stop with Ctrl+C). If
 
 ## Bank sync (Plaid)
 
-Optional. Instead of downloading CSVs, the dashboard can pull your card's transactions from the bank through [Plaid](https://plaid.com). Each time `spend dashboard` opens, it asks Plaid what changed since last time and runs new transactions through the same [categorization](#how-categorization-works) as `spend import`: your choices, rules, remembered merchants, then Jev. Then it shows them.
+Optional. Instead of downloading CSVs, the dashboard can pull your card's transactions from the bank through [Plaid](https://plaid.com). Each time `spend dashboard` opens, it asks Plaid what changed since last time and runs new transactions through the same [categorization](#how-categorization-works) as `spend import`: your choices, the local payment check, remembered merchants, then Jev. Then it shows them.
 
 ### Setup
 
@@ -230,6 +230,7 @@ Synced with MSUFCU just now: 3 new, 0 updated, 0 removed. 1 to categorize with `
 - **Credit accounts only:** the card, or a credit line. Checking and savings are skipped (listed as "Not tracked"): until [checking support](documents/checking-ideas.md) exists, card payments would count twice.
 - **Posted transactions only:** pending ones wait until they post.
 - **No double counting with CSV imports:** when you connect your bank, the newest CSV-imported date becomes the cutover, and Plaid's transactions up to that date are skipped. After connecting, don't import CSVs covering later dates; those transactions would be counted twice.
+- **Descriptions like the CSV's:** through Plaid, MSUFCU wraps each purchase as `Credit Card Advance <merchant> Date MM/DD/YY <reference> <nnnn> Card #<last 4>`. Only the merchant part is kept, so merchants you've already categorized are recognized, and no date goes to Jev.
 - **Changes from the bank:** if Plaid reports a new amount or description, the row is updated and keeps its category. A transaction Plaid removes is deleted. Rows from CSV imports are never touched.
 
 ### Signing in again
@@ -277,7 +278,7 @@ With [bank sync](#bank-sync-plaid), steps 1 and 2 happen by themselves whenever 
 Each transaction takes the first answer it gets:
 
 1. **Your manual choices** from `review` / `set` take priority.
-2. **Card payments and refunds** (`ACH Pmt:<account numbers>`, `HB XFR Pmt`, `Credit Voucher`, ...) go to `Payments & Credits`, matched locally. They never reach the model.
+2. **Card payments and refunds** (`ACH Pmt:<account numbers>`, `HB XFR Pmt`, `Credit Voucher`, `ACH Loan Payment` from bank sync, ...) go to `Payments & Credits`, matched locally. They never reach the model.
 3. **Merchant memory:** a merchant the LLM already categorized on an earlier import.
 4. **Jev via OpenRouter,** only for merchants never seen before. Jev is TypeSafe's typed decision model: it doesn't write text, it picks one of your categories and returns a probability for each.
    - Only the Description column goes out, with any token containing 3+ digits (account/reference/phone numbers) masked. Amount, balance, draft number, dates and the account line at the top of the export are never sent.

@@ -153,7 +153,7 @@ Both sources go through `pipeline.py`, so a row from Plaid is categorized exactl
 ```mermaid
 flowchart TD
     A["MSUFCU CSV<br/>statements/*.csv"] --> B["parser.py<br/>skip account line, read Date / Amount / Description,<br/>strip 'Credit Card Ln Adv:'"]
-    A2["Plaid /transactions/sync<br/>(when the dashboard opens)"] --> B2["plaid_source.py<br/>credit accounts, posted, after the CSV cutover;<br/>the bank's own description"]
+    A2["Plaid /transactions/sync<br/>(when the dashboard opens)"] --> B2["plaid_source.py<br/>credit accounts, posted, after the CSV cutover;<br/>the bank's description, MSUFCU's wrapper removed"]
     B --> MC{"Set by you<br/>(review / set)?"}
     B2 --> MC
     MC -- yes --> MN["category (manual)"]
@@ -186,7 +186,7 @@ flowchart LR
         direction TB
         a1["Account line<br/>(first line of the export)"]
         a2["Amount · Fee · New Balance<br/>Draft Number · Dates"]
-        a3["Payment rows<br/>ACH Pmt / HB XFR Pmt / Credit Voucher<br/>(matched locally)"]
+        a3["Payment rows<br/>ACH Pmt / HB XFR Pmt / Credit Voucher /<br/>ACH Loan Payment (bank sync)<br/>(matched locally)"]
         a4["data/spending.db"]
     end
     subgraph SENT["🌐 Sent to Jev (OpenRouter, zero data retention)"]
@@ -258,7 +258,7 @@ flowchart LR
 
 | Proposal | First thing to verify |
 |---|---|
-| Plaid | Does MSUFCU expose the **credit line** in Plaid Link, or only share/checking accounts? |
+| Plaid | How long MSUFCU's OAuth consent lasts before you have to sign in again. (Whether the **credit line** comes through is answered: it does.) |
 | Checking | What does a real checking CSV look like (payroll, Zelle, card-payment rows)? |
 
 ## Current status (2026-10-07)
