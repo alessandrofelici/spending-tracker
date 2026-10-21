@@ -14,6 +14,7 @@ def categorize_rows(
     txns: Sequence[Transaction],
     ids: Sequence[str],
     statement: str,
+    source_kind: str = "csv",
     use_llm: bool = True,
 ) -> tuple[list[dict], dict[str, Answer]]:
     """Database rows for txns (ids aligned with them) and Jev's answers from this run.
@@ -36,6 +37,7 @@ def categorize_rows(
             "category": cat,
             "source": src,
             "statement": statement,
+            "source_kind": source_kind,
         }
         for tid, t, (cat, src) in zip(ids, txns, results, strict=True)
     ]
