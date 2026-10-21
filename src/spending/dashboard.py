@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from spending.bank_sync import render as render_bank_sync
 from spending.db import DB_PATH, connect
 from spending.jev_tab import render as render_jev_tab
 
@@ -23,11 +24,16 @@ def load() -> pd.DataFrame:
     return df[~df.category.isin(EXCLUDED)]
 
 
+st.title("Spending")
+# Before load(), so the charts include whatever it just pulled from the bank.
+bank = render_bank_sync()
+
 df = load()
 if df.empty:
-    st.title("Spending")
     st.info(
-        "No transactions yet. Import a statement with `uv run spend import statements/<file>.csv`."
+        "No transactions yet. "
+        + ("Sign in to your bank above, or import" if bank == "sign_in" else "Import")
+        + " a statement with `uv run spend import statements/<file>.csv`."
     )
     st.stop()
 
@@ -44,7 +50,6 @@ df["group"] = df.category.where(df.category.isin(top), REST)
 colors = {c: PALETTE[i] for i, c in enumerate(top)} | {REST: REST_COLOR}
 order = top + [REST]
 
-st.title("Spending")
 spending_tab, jev_tab = st.tabs(["Spending", "Categorization"])
 
 with jev_tab:
