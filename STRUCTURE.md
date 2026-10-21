@@ -38,19 +38,20 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | Path | User | Developer | Status | Notes |
 |---|:-:|:-:|---|---|
 | `statements/` | ✅ | | **In use** | Drop MSUFCU CSV exports here. Holds `l50csvdl.csv` (Jan–Oct 2026). Git-ignored. |
-| `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard` |
+| `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard`, `unlink` |
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard`. With Plaid set up, it pulls new transactions each time it opens, or asks you to sign in to your bank |
 | `categories.toml` | ✅ | | **In use** | Each user's own category list and the descriptions Jev reads, plus example keyword rules used only by `jev_eval`. Copied from the example at setup; users add categories with `+` in `spend review`. Git-ignored. |
 | `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
-| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`), plus `plaid_items` (each bank login's sync cursor and CSV cutover date). `plaid-tokens.json` holds the Plaid access token, owner-only, only where there's no OS keyring (e.g. WSL). Git-ignored. |
-| `src/spending/` | | ✅ | **Active development** | All app code (~2,200 lines) |
+| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`), plus `plaid_items` (each bank login's sync cursor and cutover date). `plaid-tokens.json` holds the Plaid access token, owner-only, only where there's no OS keyring (e.g. WSL). The folder and database are created owner-only (700 / 600). Git-ignored. |
+| `src/spending/` | | ✅ | **Active development** | All app code (~2,400 lines) |
+| `src/spending/.streamlit/config.toml` | | ✅ | Config | Dashboard server settings, applied however it's started: only `127.0.0.1`, only the hostnames `localhost` / `127.0.0.1` (blocks DNS rebinding), no usage statistics |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
 | `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
 | `.env` | | ✅ | Secret | `OPENROUTER_KEY`; optionally `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` for bank sync. Git-ignored. |
 | `README.md` | ✅ | ✅ | Docs | Usage and how categorization works |
 | `STRUCTURE.md` | | ✅ | Docs | This file |
 | `documents/` | | ✅ | **Planning** | Feature proposals, separate from the MVP (see [Planned features](#planned-features)) |
-| `documents/plaid-ideas.md` | | ✅ | In progress | Pull transactions via Plaid instead of downloading CSVs. MVP built: the dashboard syncs when it opens and signs in through Plaid Link (tested against a fake Plaid, not yet a real bank). Not yet: Plaid's categories, `spend sync`/`unlink`, a schedule. |
+| `documents/plaid-ideas.md` | | ✅ | In progress | Pull transactions via Plaid instead of downloading CSVs. MVP built and connected to MSUFCU: the dashboard syncs when it opens and signs in through Plaid Link; `spend unlink` disconnects. Not yet: Plaid's categories, `spend sync`, a schedule. |
 | `documents/jev-review.md` | | ✅ | Docs | What Jev is, how `classify.py` uses it, agreement eval results, and speed/cost vs a chat LLM (with how it was estimated) |
 | `documents/checking-ideas.md` | | ✅ | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
 | `documents/extend-review.md` | | ✅ | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
@@ -245,7 +246,7 @@ flowchart LR
 
 | File | Plaid | Checking |
 |---|---|---|
-| `src/spending/cli.py` | `sync`, `unlink` commands (signing in and syncing live in the dashboard) | `import --account`, reconciliation in `review` |
+| `src/spending/cli.py` | ✅ `unlink`; `sync` still proposed (signing in and syncing live in the dashboard) | `import --account`, reconciliation in `review` |
 | `src/spending/parser.py` | ✅ New sibling `plaid_source.py` (Plaid → `Transaction`), via `pipeline.py` like a CSV | Accept checking exports; local rules for income / P2P |
 | `src/spending/classify.py` | Plaid category mapping before the LLM | Never send income or P2P rows to the LLM |
 | `src/spending/db.py` | ✅ `source_kind` column, `plaid_items` table (`id` is Plaid's transaction id, so no `external_id`) | `account`, `kind`, `match_id` columns |
