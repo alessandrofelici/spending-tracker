@@ -1,6 +1,6 @@
 # Example categories. Copy this file to categories.toml and make it yours:
 #   cp categories.example.toml categories.toml
-# categories.toml is git-ignored, so your categories and rules stay local.
+# categories.toml is git-ignored, so your categories stay local.
 # `spend review` writes categories you add with `+` there, not here.
 #
 # The only categories a transaction can ever be assigned.
@@ -38,8 +38,11 @@ categories = [
 "Payments & Credits" = "Payments to the card, refunds and credits"
 "Other" = "Doesn't clearly fit any other category"
 
-# Keyword rules are checked first (case-insensitive substring match on the
-# transaction description). They are free, offline, and always win over the LLM.
+# Example keyword rules. Imports don't use them: Jev categorizes every merchant
+# (card payments and refunds are matched locally and never sent). They're only
+# labels for `uv run python -m spending.jev_eval`, which checks how often Jev
+# agrees with them and shows the result in the dashboard's Categorization tab.
+# Case-insensitive substring match on the transaction description.
 [rules]
 "Groceries" = ["KROGER", "MEIJER", "ALDI", "TRADER JOE", "WHOLE FOODS", "FOODS MARKET"]
 "Dining" = ["MCDONALD", "STARBUCKS", "CHIPOTLE", "DOORDASH", "UBER EATS", "GRUBHUB", "PANERA", "TACO BELL", "WENDY", "SUBWAY", "DOMINO", "PIZZA", "CAFE", "COFFEE"]

@@ -1,10 +1,11 @@
-"""How often does Jev agree with your keyword rules?
+"""How often does Jev agree with keyword rules?
 
     uv run python -m spending.jev_eval [--no-save]
 
-Sends every merchant a keyword rule already categorized to Jev (redacted, same as an
-import) and compares the answers with the rules. Payment rows are left out, so they
-stay local. Answers are stored in jev_evals; they never touch jev_answers (review
+Imports don't use keyword rules; Jev categorizes every merchant. The `[rules]` in
+categories.toml are kept only as labels to check Jev against: every stored merchant
+a rule matches is sent to Jev (redacted, same as an import) and the answers are
+compared with the rules. Payment rows are left out, so they stay local. Answers are stored in jev_evals; they never touch jev_answers (review
 suggestions), merchant_memory or any transaction.
 """
 
@@ -14,22 +15,30 @@ import time
 from collections import Counter
 
 from . import db
-from .classify import classify_with_llm, load_config
+from .classify import (
+    PAYMENTS,
+    classify_with_llm,
+    is_payment,
+    load_config,
+    load_rules,
+    match_rule,
+)
 
-LOCAL_ONLY = {"Payments & Credits"}
 
-
-def rule_merchants(conn) -> dict[str, tuple[str, str]]:
-    """merchant -> (rule category, example description), from stored rule-matched rows."""
+def rule_merchants(conn, rules: dict[str, list[str]]) -> dict[str, tuple[str, str]]:
+    """merchant -> (rule category, example description), for stored merchants a rule matches."""
     rows = conn.execute(
-        """SELECT merchant, category, MIN(description) AS description
-           FROM transactions WHERE source = 'rule' GROUP BY merchant, category"""
+        """SELECT merchant, MIN(description) AS description
+           FROM transactions WHERE source != 'payment' GROUP BY merchant"""
     )
-    return {
-        r["merchant"]: (r["category"], r["description"])
-        for r in rows
-        if r["category"] not in LOCAL_ONLY
-    }
+    out = {}
+    for r in rows:
+        if is_payment(r["description"]):
+            continue
+        cat = match_rule(r["description"], rules)
+        if cat and cat != PAYMENTS:
+            out[r["merchant"]] = (cat, r["description"])
+    return out
 
 
 def percentile(values: list[float], p: int) -> float:
@@ -46,12 +55,16 @@ def main() -> None:
     args = parser.parse_args()
 
     conn = db.connect()
-    expected = rule_merchants(conn)
+    categories = load_config()
+    rules = load_rules(categories)
+    if not rules:
+        print("No [rules] in categories.toml. Copy them from categories.example.toml.")
+        return
+    expected = rule_merchants(conn, rules)
     if not expected:
-        print("No rule-matched merchants yet. Import a statement first.")
+        print("No stored merchants match a rule. Import a statement first.")
         return
     rule = {m: cat for m, (cat, _) in expected.items()}
-    categories, _ = load_config()
 
     print(f"Asking Jev about {len(expected)} rule-matched merchant(s)...")
     start = time.perf_counter()

@@ -74,7 +74,7 @@ What to notice:
 Everything is in `src/spending/classify.py`. Jev is the **last resort**: `categorize()` (line 154) gives each transaction the first answer it finds, in this order:
 
 1. **manual:** a category you set with `spend review` / `spend set`
-2. **rule:** a keyword substring from `categories.toml` (`match_rule`, line 54)
+2. **payment:** card payments and refunds, matched locally (`is_payment`); they never reach Jev
 3. **memory:** a merchant already categorized on an earlier import
 4. **Jev:** only for merchants never seen before
 5. **fallback:** `Other`, shown in `spend review`
@@ -82,7 +82,7 @@ Everything is in `src/spending/classify.py`. Jev is the **last resort**: `catego
 Step 4 (`classify_with_llm`, line 78, and `_decide`, line 120) works like this:
 
 - **One request per unique merchant, not per transaction.** A merchant you visit 20 times costs one request, and the answer is saved to `merchant_memory`, so it's never asked again.
-- **Redacted before sending.** `redact()` (line 62) masks any token with 3+ digits (store numbers, phone numbers, references). Only the description goes out: no amount, date or account. Payment rows are caught by rules first, so they never reach Jev.
+- **Redacted before sending.** `redact()` (line 62) masks any token with 3+ digits (store numbers, phone numbers, references). Only the description goes out: no amount, date or account. Payment rows are caught locally first, so they never reach Jev.
 - **Criteria come from `categories.toml`.** The `[descriptions]` table becomes `criteria` (line 91), so editing a description directly changes what Jev is choosing between.
 - **8 requests in parallel** (`WORKERS`, line 97), each in its own request, so one odd description can't affect another's answer.
 - **One retry** on a network or parse error (line 136). After that the merchant counts as failed.
@@ -113,6 +113,8 @@ Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
 
 ## Accuracy: agreement with keyword rules
 
+Imports no longer use keyword rules; the `[rules]` in `categories.toml` are kept only as these labels.
+
 `uv run python -m spending.jev_eval` (run 2026-10-07 on the real DB). Every merchant a keyword rule had already categorized was sent to Jev exactly as an import would send it, and Jev's answer was compared with the rule's. That's 59 merchants; payment rows are left out so they stay local. The rules serve as labels we already have, though they aren't always right themselves.
 
 | | Result |
@@ -142,7 +144,7 @@ The four disagreements:
 | A university bike repair shop | Education (`MSU `) | Gas & Transport (0.60, confident) | **Jev**: bike repair is transport |
 | A rail ticket purchase | Travel (`AMTRAK`) | Gas & Transport (0.50, unsure) | **Rule**, but Jev wasn't confident, so an import would send it to review rather than mislabel it |
 
-**Takeaway:** where Jev disagreed with the rules, it was usually catching a rule that's too broad (`COSTCO`, `MSU `). Its only real miss came back below the threshold, so the confidence check worked as designed. Narrowing the `COSTCO` rule so it skips gas stations, and narrowing `MSU ` so it only catches tuition and books, would fix those cases in `categories.toml`.
+**Takeaway:** where Jev disagreed with the rules, it was usually catching a rule that's too broad (`COSTCO`, `MSU `). Its only real miss came back below the threshold, so the confidence check worked as designed. These results are why rules no longer categorize imports: Jev alone does as well or better, and too-broad rules were the main source of mistakes.
 
 ## Speed and cost: Jev vs a chat LLM
 
