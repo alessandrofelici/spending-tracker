@@ -29,6 +29,13 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 ├──  statements
 │   └──  l50csvdl.csv
 ├──  STRUCTURE.md
+├──  tests
+│   ├──  conftest.py
+│   ├──  fakes.py
+│   ├──  test_data_safety.py
+│   ├──  test_plaid_link.py
+│   ├──  test_plaid_sync.py
+│   └──  test_storage.py
 └──  uv.lock
 ```
 
@@ -45,7 +52,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`), plus `plaid_items` (each bank login's sync cursor and cutover date). `plaid-tokens.json` holds the Plaid access token, owner-only, only where there's no OS keyring (e.g. WSL). The folder and database are created owner-only (700 / 600). Git-ignored. |
 | `src/spending/` | | ✅ | **Active development** | All app code (~2,400 lines) |
 | `src/spending/.streamlit/config.toml` | | ✅ | Config | Dashboard server settings, applied however it's started: only `127.0.0.1`, only the hostnames `localhost` / `127.0.0.1` (blocks DNS rebinding), no usage statistics |
-| `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
+| `tests/` | | ✅ | Tests | `uv run pytest`, before and after big changes: data safety (file permissions, token storage, what reaches Jev and Plaid, git-ignore and commit-hook guards, dashboard binding), storage integrity, and bank sync and sign-in against a fake Plaid (`fakes.py`). Offline, made-up data, a throwaway database per test |
+| `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit, pytest) and their settings |
 | `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
 | `.env` | | ✅ | Secret | `OPENROUTER_KEY`; optionally `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` for bank sync. Git-ignored. |
 | `README.md` | ✅ | ✅ | Docs | Usage and how categorization works |
