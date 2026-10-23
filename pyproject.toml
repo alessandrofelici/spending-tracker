@@ -30,9 +30,15 @@ packages = ["src/spending"]
 dev = [
     "pre-commit>=4.6.2",
     "pre-commit-hooks>=6.0.0",
+    "pytest>=9.1.1",
     "ruff>=0.16.10",
     "ty>=0.0.85",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Show why tests were skipped (e.g. no git for the .gitignore checks).
+addopts = ["-ra"]
 
 [tool.ruff]
 target-version = "py311"
@@ -46,7 +52,8 @@ ignore = ["E501"]
 
 [tool.ty.environment]
 python = ".venv"
-root = ["src"]
+# tests/ so the tests' shared fakes (tests/fakes.py) resolve.
+root = ["src", "tests"]
 
 # Claude Code worktrees are full checkouts inside the repo; each is
 # checked from its own directory, not from here.
