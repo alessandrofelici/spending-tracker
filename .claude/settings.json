@@ -13,7 +13,11 @@
       "Bash(gh repo view*)",
       "Bash(gh issue list*)",
       "Bash(gh issue view*)",
-      "Bash(gh label list*)"
+      "Bash(gh label list*)",
+      "Bash(uv run pytest*)",
+      "Bash(uv run pre-commit*)",
+      "Bash(uv run ruff*)",
+      "Bash(uv run ty*)"
     ],
     "ask": [
       "Bash(git commit --amend*)",
