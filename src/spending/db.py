@@ -75,7 +75,12 @@ DATA_MIGRATIONS = [
 
 
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Owner-only: this is your bank data. SQLite gives its journal the
+    # database's permissions. An existing folder or file keeps its own (see the
+    # README for tightening an older setup).
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not path.exists():
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
