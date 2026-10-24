@@ -22,7 +22,6 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 │       ├──  dashboard.py
 │       ├──  db.py
 │       ├──  jev_eval.py
-│       ├──  jev_tab.py
 │       ├──  parser.py
 │       ├──  pipeline.py
 │       └──  plaid_source.py
@@ -49,8 +48,8 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard`. With Plaid set up, it pulls new transactions each time it opens, or asks you to sign in to your bank |
 | `categories.toml` | ✅ | | **In use** | Each user's own category list and the descriptions Jev reads, plus example keyword rules used only by `jev_eval`. Copied from the example at setup; users add categories with `+` in `spend review`. Git-ignored. |
 | `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
-| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`), plus `plaid_items` (each bank login's sync cursor and cutover date). `plaid-tokens.json` holds the Plaid access token, owner-only, only where there's no OS keyring (e.g. WSL). The folder and database are created owner-only (700 / 600). Git-ignored. |
-| `src/spending/` | | ✅ | **Active development** | All app code (~2,400 lines) |
+| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions) and `jev_evals` (results of `python -m spending.jev_eval`), plus `plaid_items` (each bank login's sync cursor and cutover date). `plaid-tokens.json` holds the Plaid access token, owner-only, only where there's no OS keyring (e.g. WSL). The folder and database are created owner-only (700 / 600). Git-ignored. |
+| `src/spending/` | | ✅ | **Active development** | All app code (~2,000 lines) |
 | `src/spending/.streamlit/config.toml` | | ✅ | Config | Dashboard server settings, applied however it's started: only `127.0.0.1`, only the hostnames `localhost` / `127.0.0.1` (blocks DNS rebinding), no usage statistics |
 | `tests/` | | ✅ | Tests | `uv run pytest`, before and after big changes: data safety (file permissions, token storage, what reaches Jev and Plaid, git-ignore and commit-hook guards, dashboard binding), storage integrity, and bank sync and sign-in against a fake Plaid (`fakes.py`). Offline, made-up data, a throwaway database per test |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit, pytest) and their settings |
@@ -91,7 +90,7 @@ flowchart TB
         D2["parser.py"]
         D3["classify.py<br/>+ pipeline.py"]
         D4["db.py"]
-        D5["dashboard.py<br/>+ jev_tab.py"]
+        D5["dashboard.py"]
         D6["jev_eval.py"]
         D7["bank_sync.py<br/>+ plaid_source.py"]
     end
@@ -122,7 +121,6 @@ flowchart LR
     classify["classify.py<br/>manual → payments → memory → Jev"]
     db["db.py<br/>SQLite schema + queries"]
     dash["dashboard.py<br/>Streamlit + Plotly"]
-    jevtab["jev_tab.py<br/>Categorization tab"]
     jeval["jev_eval.py<br/>Jev vs example keyword rules"]
     pipeline["pipeline.py<br/>categorize → store"]
     banksync["bank_sync.py<br/>sync on open, sign-in"]
@@ -144,12 +142,10 @@ flowchart LR
     classify --> db
     dash --> banksync
     dash --> db
-    dash --> jevtab
     banksync --> plaidsrc
     plaidsrc --> parser
     plaidsrc --> pipeline
     plaidsrc --> plaid
-    jevtab --> db
     jeval --> classify
     jeval --> db
     db --> sqlite
