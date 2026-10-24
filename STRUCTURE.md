@@ -39,8 +39,9 @@ Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 
 | Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard` |
 | `categories.toml` | ✅ | | **In use** | Each user's own category list and the descriptions Jev reads, plus example keyword rules used only by `jev_eval`. Copied from the example at setup; users add categories with `+` in `spend review`. Git-ignored. |
 | `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
-| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`). Git-ignored. |
+| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`). The folder and database are created owner-only (700 / 600). Git-ignored. |
 | `src/spending/` | | ✅ | **Active development** | All app code (~1,400 lines) |
+| `src/spending/.streamlit/config.toml` | | ✅ | Config | Dashboard server settings, applied however it's started: only `127.0.0.1`, only the hostnames `localhost` / `127.0.0.1` (blocks DNS rebinding), no usage statistics |
 | `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit) and their settings |
 | `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
 | `.env` | | ✅ | Secret | `OPENROUTER_KEY`. Git-ignored. |

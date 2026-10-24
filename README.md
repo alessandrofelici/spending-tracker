@@ -26,6 +26,8 @@ uv run spend review
 uv run spend dashboard
 ```
 
+`data/` and the database are created readable only by you. For a setup from before this, tighten them by hand: `chmod 700 data && chmod 600 data/* .env`.
+
 `categories.toml` is yours: it's git-ignored, so the categories and descriptions you add (by hand or with `+` in `spend review`) never end up in git. Before your first import, look through it: drop categories you don't need, add ones you do, and make the `[descriptions]` say what belongs in each, since that's what Jev reads. Its `[rules]` don't categorize anything; they're example labels for [checking Jev](#checking-jev-against-keyword-rules).
 
 
@@ -186,6 +188,8 @@ uv run spend dashboard
 ```
 
 Starts a local Streamlit app and opens it in your browser (stop with Ctrl+C). It has two tabs.
+
+It only accepts connections from this computer (`127.0.0.1`), and only under the names `localhost` and `127.0.0.1`, so a web page can't reach it by pointing its own domain at your machine (DNS rebinding). It also doesn't send Streamlit's usage statistics. These settings are in `src/spending/.streamlit/config.toml`.
 
 **Spending:**
 
