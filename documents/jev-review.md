@@ -1,15 +1,6 @@
 # Jev Review
 
-**Status: implemented** ([#4](https://github.com/alessandrofelici/spending-tracker/issues/4)) in [#9](https://github.com/alessandrofelici/spending-tracker/pull/9).
-
-## Motivation
-- Teach the developer about jev
-- How it is implemented in the app
-- Prove it is a good decision, and argue if the implementation difference is noticable
-
-## Specifications
-- Describe this to the user
-- When showing the differnece, create a feature branch to show visually how many transaction items were categorized by jev vs. by word matching, and how quick it would be against a chat-based LLM (using an estimate, and document how estimated)
+**Status: implemented** ([#4](https://github.com/alessandrofelici/spending-tracker/issues/4)) in [#9](https://github.com/alessandrofelici/spending-tracker/pull/9). Kept as a reference: what Jev is, how the app uses it, and whether it was the right choice. The dashboard's Categorization tab shows the same measurements for your own data.
 
 ## What Jev is
 
@@ -66,33 +57,25 @@ What to notice:
 
 - **The answer is always a key of `criteria`.** Jev can't return a typo or a made-up category, and it doesn't wrap the answer in a sentence.
 - **`confidence` isn't simply the top probability** (0.87 vs 0.88 above). The app applies its threshold to `confidence`.
-- **Most of the cost is the question, not the merchant.** About 600 of the 623 input tokens are the instructions and the 13 category descriptions, which are resent with every request. That works out to about $0.000026 per merchant, or $0.04 per million input tokens. (The README's "$0.00002" is slightly low.)
+- **Most of the cost is the question, not the merchant.** About 600 of the 623 input tokens are the instructions and the 13 category descriptions, which are resent with every request. That works out to about $0.000026 per merchant, or $0.04 per million input tokens.
 - `output_tokens` is reported but not billed.
 
 ## How the app uses it
 
-Everything is in `src/spending/classify.py`. Jev is the **last resort**: `categorize()` (line 154) gives each transaction the first answer it finds, in this order:
-
-1. **manual:** a category you set with `spend review` / `spend set`
-2. **payment:** card payments and refunds, matched locally (`is_payment`); they never reach Jev
-3. **memory:** a merchant already categorized on an earlier import
-4. **Jev:** only for merchants never seen before
-5. **fallback:** `Other`, shown in `spend review`
-
-Step 4 (`classify_with_llm`, line 78, and `_decide`, line 120) works like this:
+Jev is the **last resort**: a transaction only reaches it after your choices, the local payment check and merchant memory (the full order is in [README.md](../README.md#how-categorization-works)). In `src/spending/classify.py`, `categorize()` collects the merchants left over, and `classify_with_llm()` asks Jev about each with `_decide()`:
 
 - **One request per unique merchant, not per transaction.** A merchant you visit 20 times costs one request, and the answer is saved to `merchant_memory`, so it's never asked again.
-- **Redacted before sending.** `redact()` (line 62) masks any token with 3+ digits (store numbers, phone numbers, references). Only the description goes out: no amount, date or account. Payment rows are caught locally first, so they never reach Jev.
-- **Criteria come from `categories.toml`.** The `[descriptions]` table becomes `criteria` (line 91), so editing a description directly changes what Jev is choosing between.
-- **8 requests in parallel** (`WORKERS`, line 97), each in its own request, so one odd description can't affect another's answer.
-- **One retry** on a network or parse error (line 136). After that the merchant counts as failed.
-- **Checked again locally.** An answer that isn't one of your categories is rejected (line 148).
-- **Unsure answers go to review.** If the answer is `Other` or `confidence < JEV_MIN_CONFIDENCE` (0.6 by default, line 105), the merchant becomes `fallback` and isn't remembered, so you decide it in `spend review`.
-- **Zero data retention only** (`provider.zdr`, line 134).
+- **Redacted before sending.** `redact()` masks any token with 3+ digits (store numbers, phone numbers, references). Only the description goes out: no amount, date or account. Payment rows are caught locally first, so they never reach Jev.
+- **Criteria come from `categories.toml`.** `load_criteria()` turns the `[descriptions]` table into `criteria`, so editing a description directly changes what Jev is choosing between.
+- **8 requests in parallel** (`WORKERS`), each in its own request, so one odd description can't affect another's answer.
+- **One retry** on a network or parse error. After that the merchant counts as failed.
+- **Checked again locally.** An answer that isn't one of your categories is rejected.
+- **Unsure answers go to review.** If the answer is `Other` or `confidence < JEV_MIN_CONFIDENCE` (0.6 by default), the merchant becomes `fallback` and isn't remembered, so you decide it in `spend review`.
+- **Zero data retention only** (`provider.zdr`).
 
 ## Why Jev instead of a chat LLM
 
-Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
+Below is the case for Jev. The next two sections test it with real numbers.
 
 | | Chat LLM | Jev |
 |---|---|---|
@@ -105,7 +88,7 @@ Below is the case for Jev. Steps 3–4 of the plan test it with real numbers.
 
 **Where Jev falls short:**
 
-- **It can't explain an answer.** When it's wrong you see the probabilities but not the reason, and the only fix is a manual choice, a rule or a clearer `[descriptions]` entry.
+- **It can't explain an answer.** When it's wrong you see the probabilities but not the reason, and the only fix is a manual choice or a clearer `[descriptions]` entry.
 - **The API is alpha**, so the request or response shape may change.
 - **It only sees the redacted description**, by design. Short or vague descriptions (`SQ *...`, LLC names) don't carry enough signal, and no model can fix that. Those end up in `spend review`.
 - **The question costs more than the answer.** The fixed ~600-token prompt dominates the cost. It's still a fraction of a cent per import, but trimming the descriptions makes every request cheaper.
@@ -203,53 +186,3 @@ At 8 requests in parallel, an import takes ⌈merchants / 8⌉ rounds of one req
 - **Every answer is one of your categories.** A chat model needs a JSON-parsing step plus retry and validation code, and still occasionally invents a label.
 - **Each answer comes with a confidence.** That number decides what goes to `spend review`, and in the eval it caught the one real mistake (Amtrak, 0.50). A chat model has no comparable signal; asking it to rate its own confidence doesn't produce a calibrated number.
 - **The description can't steer the output.** The worst a malicious description can do is pick the wrong category from your list.
-
-## Plan
-
-### Decisions
-- **Visual:** a new "Categorization" tab in the existing Streamlit dashboard (no separate report).
-- **Speed:** Jev's side is measured (timing added to real requests); the chat-LLM side is estimated, with the method written down next to the numbers.
-- **Accuracy:** measured as Jev's agreement with the keyword rules on the merchants the rules already categorize.
-- **Data:** Jev's confidence, outcome and latency are stored per merchant in a new table (non-breaking).
-- **Branch:** work happens on this worktree's branch (`worktree-jev-review`), never `main`.
-
-### Starting point (2026-10-07, real DB)
-| source | transactions | merchants |
-|---|--:|--:|
-| rule | 169 | 62 |
-| llm (Jev) | 149 | 69 |
-| fallback | 40 | 27 |
-| **total** | **358** | **158** |
-
-What the data can't tell us yet:
-- Jev's confidence isn't stored.
-- `fallback` lumps together failed requests, answers below `JEV_MIN_CONFIDENCE` and "Jev picked Other".
-- Request latency isn't recorded.
-- On later imports, merchants Jev already answered show as `memory`, so "categorized by Jev" = `llm` + `memory` where `merchant_memory.source = 'llm'`.
-
-### Steps (one commit each)
-1. **Explainer** (this document): what Jev is (a typed decision model on OpenRouter's Decisions API: you give it a state and a `choice` question with criteria, it returns a choice plus a confidence, with no text to parse), and how `classify.py` uses it (manual → rule → memory → Jev → fallback; `redact()`; one request per merchant, 8 workers; `provider.zdr`; the 0.6 threshold; the local check that the answer is a valid category). Also why it suits this task better than a chat LLM, and where it falls short. Checked against OpenRouter's docs and a real response, not written from memory.
-2. **Record Jev decisions** (`db.py`, `classify.py`): a new table `jev_decisions(merchant, choice, confidence, status, latency_ms, model, decided_at)` with `status` ∈ `ok | unsure | said_other | failed`, created with `CREATE TABLE IF NOT EXISTS` so existing DBs keep working. It's a separate table instead of new `merchant_memory` columns so that unsure or failed merchants don't become `memory` hits on the next import. `_decide()` returns latency and status; the import prints the batch's wall time.
-   - *Changed at merge (2026-10-08):* `main` had meanwhile added `jev_answers` (Jev's latest answer per merchant, used by `spend review`). Instead of a second table, `latency_ms` was added to `jev_answers`, and the eval writes to its own `jev_evals` table so it never changes review suggestions. Outcomes use main's names: `confident | unsure | chose_other | failed`.
-3. **Agreement eval** (`src/spending/jev_eval.py`, run with `uv run python -m spending.jev_eval`): opt-in, not part of import. Sends the rule-matched merchants (redacted, ZDR; payment rows excluded so they stay local) to Jev, then reports agreement overall and per category, the disagreements and per-request latency. About 62 requests, ≈ $0.001. Rows are stored tagged `eval` and never written to `merchant_memory`. This also gives real latency numbers without re-importing.
-4. **Speed estimate** (section in this document):
-   - Jev: measured p50 / p95 latency per request and wall time at 8 workers, from steps 2–3.
-   - Chat LLM, estimated per merchant as `TTFT + output_tokens / throughput`:
-     - input tokens = instructions + the 13 category descriptions + the description, counted with a real tokenizer
-     - output tokens = a JSON answer, with and without short reasoning
-     - TTFT and throughput from OpenRouter's published stats for one or two chat models, cited with the date checked
-     - plus an assumed retry rate for unparseable or off-list answers, labeled as an assumption
-   - Cost compared the same way.
-5. **Dashboard "Categorization" tab** (`dashboard.py`):
-   - transactions, merchants and $ by source (rule / Jev / manual / fallback), where "Jev" includes `memory` hits it originally decided
-   - fallback split by `outcome` where known
-   - a confidence histogram with the threshold marked
-   - eval agreement, if it has been run
-   - a measured-Jev vs estimated-chat latency chart, captioned with how the estimate was made
-6. **Docs:** README (the eval command, the new tab) and STRUCTURE (the new table and module).
-
-### Verification
-- `uv run pre-commit run --all-files` before every commit.
-- `spend import --dry-run --no-llm` against a scratch copy of the DB (via `SPENDING_DB`).
-- Launch the dashboard once to check the new tab renders.
-- The real DB is only read, except for the opt-in eval writing `jev_evals` rows.
