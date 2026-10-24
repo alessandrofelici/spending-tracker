@@ -299,3 +299,15 @@ uv run pre-commit run --all-files   # check everything by hand
 ```
 
 If a hook fixes files (Ruff, whitespace), the commit stops. Review the changes, `git add` them and commit again. In VS Code, the [ty extension](https://marketplace.visualstudio.com/items?itemName=astral-sh.ty) shows the same type errors the hook checks for.
+
+### Tests
+
+Run the tests before and after any big change, especially to storage or categorizing:
+
+```bash
+uv run pytest
+```
+
+They check that your data stays safe (the database is private, a CSV import keeps only the date, amount and description, only redacted new merchants reach Jev, bank data is git-ignored and blocked by the commit hook, the dashboard only listens on this machine) and that imports never duplicate or overwrite your choices.
+
+They run offline in a few seconds and never touch your data: each test gets its own throwaway database, the example categories and no API keys, with made-up transactions. Any real network request fails the test.
