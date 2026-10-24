@@ -1,12 +1,13 @@
 """How often does Jev agree with keyword rules?
 
-    uv run python -m spending.jev_eval [--no-save]
+    uv run python -m spending.jev_eval
 
 Imports don't use keyword rules; Jev categorizes every merchant. The `[rules]` in
 categories.toml are kept only as labels to check Jev against: every stored merchant
 a rule matches is sent to Jev (redacted, same as an import) and the answers are
-compared with the rules. Payment rows are left out, so they stay local. Answers are stored in jev_evals; they never touch jev_answers (review
-suggestions), merchant_memory or any transaction.
+compared with the rules. Payment rows are left out, so they stay local. The results
+are only printed: nothing is stored, so jev_answers (review suggestions),
+merchant_memory and your transactions stay as they were.
 """
 
 import argparse
@@ -48,11 +49,7 @@ def percentile(values: list[float], p: int) -> float:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--no-save", action="store_true", help="Don't store answers in jev_evals"
-    )
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
 
     conn = db.connect()
     categories = load_config()
@@ -107,11 +104,6 @@ def main() -> None:
         f"p95 {percentile(latencies, 95):.0f} ms, max {max(latencies):.0f} ms"
     )
     print(f"Wall time for {len(answers)} requests: {wall:.1f}s")
-
-    if not args.no_save:
-        db.save_evals(conn, answers, rule)
-        conn.commit()
-        print("Saved to jev_evals.")
 
 
 if __name__ == "__main__":

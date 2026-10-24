@@ -60,18 +60,6 @@ CREATE TABLE IF NOT EXISTS jev_answers (
     asked_with TEXT NOT NULL,   -- hash of the categories + descriptions it chose from
     latency_ms REAL             -- that request, including its retry; NULL if older
 );
-
--- `python -m spending.jev_eval`: Jev's answer for merchants a keyword rule in
--- categories.toml matches. Kept apart from jev_answers so it never changes review suggestions.
-CREATE TABLE IF NOT EXISTS jev_evals (
-    merchant     TEXT NOT NULL,
-    rule         TEXT NOT NULL,   -- the category the keyword rule gave it
-    choice       TEXT,            -- Jev's pick; NULL if the request failed
-    confidence   REAL NOT NULL,
-    outcome      TEXT NOT NULL,   -- confident | unsure | chose_other | failed
-    latency_ms   REAL NOT NULL,
-    evaluated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
 """
 
 # Columns added after a table was first created: (table, column, definition).
@@ -144,21 +132,6 @@ def save_answers(conn: sqlite3.Connection, answers: Mapping[str, "Answer"]) -> N
            (merchant, choice, confidence, outcome, asked_with, latency_ms)
            VALUES (?, ?, ?, ?, ?, ?)""",
         [(m, *a) for m, a in answers.items()],
-    )
-
-
-def save_evals(
-    conn: sqlite3.Connection, answers: Mapping[str, "Answer"], rules: Mapping[str, str]
-) -> None:
-    """rules: merchant -> the category its keyword rule gave it."""
-    conn.executemany(
-        """INSERT INTO jev_evals
-           (merchant, rule, choice, confidence, outcome, latency_ms)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [
-            (m, rules[m], a.choice, a.confidence, a.outcome, a.latency_ms)
-            for m, a in answers.items()
-        ],
     )
 
 
