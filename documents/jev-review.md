@@ -133,7 +133,7 @@ The four disagreements:
 
 ### Method
 
-**Jev is measured.** The eval above timed every request (stored in `jev_evals`). The numbers are wall-clock times from this machine, network included, with `WORKERS = 8`:
+**Jev is measured.** The eval above timed every request. The numbers are wall-clock times from this machine, network included, with `WORKERS = 8`:
 
 - per request: **p50 216 ms, p95 446 ms, max 492 ms**
 - 59 merchants: **1.9 s** in total

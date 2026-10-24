@@ -20,8 +20,7 @@ cp categories.example.toml categories.toml
 
 # 4. Download transactions from MSUFCU and put the CSV in statements/
 
-# 5. Preview, then import everything you have
-uv run spend import statements/*.csv --dry-run --no-llm   # offline preview
+# 5. Import everything you have
 uv run spend import statements/*.csv
 
 # 6. Fix whatever the LLM couldn't place, then look at the charts
@@ -41,14 +40,13 @@ All commands run as `uv run spend <command>`. Add `--help` to any of them for th
 | [`import`](#spend-import) | Read CSV export(s), categorize, store | ✅ |
 | [`review`](#spend-review) | Walk through uncategorized merchants, pick or create categories | ✅ |
 | [`set`](#spend-set) | Set one merchant's category directly | ✅ |
-| [`summary`](#spend-summary) | Print one month's spending by category | — |
 | [`dashboard`](#spend-dashboard) | Open the charts in your browser, after syncing with your bank if [set up](#bank-sync-plaid) | only with bank sync |
 | [`unlink`](#disconnecting) | Disconnect your bank: revoke Plaid's access and delete the token | ✅ |
 
 ### `spend import`
 
 ```bash
-uv run spend import FILE [FILE ...] [--dry-run] [--no-llm]
+uv run spend import FILE [FILE ...]
 ```
 
 - Reads one or more MSUFCU CSV exports. It skips the account line at the top and uses only Date, Amount and Description. Balance and draft number are ignored.
@@ -56,11 +54,7 @@ uv run spend import FILE [FILE ...] [--dry-run] [--no-llm]
 - Categorizes each transaction (see [order](#how-categorization-works)) and saves it to `data/spending.db`.
 - **Safe to repeat:** transactions are deduplicated, so overlapping downloads or re-importing the same file adds nothing twice.
 - Transactions are grouped by the month they happened in, not by statement period.
-
-| Option | Effect |
-|---|---|
-| `--dry-run` | Print every row with its category and source; save nothing. It **still asks the LLM** about new merchants (answers aren't remembered), so combine with `--no-llm` for a fully offline preview. |
-| `--no-llm` | Use only your choices and remembered merchants. Unknown merchants become `Other`. Nothing leaves your machine. |
+- Without `OPENROUTER_KEY` in `.env`, new merchants aren't sent to Jev: they become `Other` for `spend review`.
 
 ```
 $ uv run spend import statements/oct.csv
@@ -167,21 +161,6 @@ $ uv run spend set e Health
 Use the exact name, or add --all-matches to set them all.
 ```
 
-### `spend summary`
-
-```bash
-uv run spend summary [--month YYYY-MM]
-```
-
-Spending by category for one month, defaulting to the latest month with data. Payments and credits to the card are left out of the total.
-
-```
-Spending for 2026-04
-
-  Groceries                 84.34   97.0%  (2 txns)
-  Dining                     2.62    3.0%  (1 txns)
-  Total                     86.96
-```
 
 ### `spend dashboard`
 
@@ -257,7 +236,7 @@ flowchart TD
     A["Download CSV from MSUFCU<br/>→ statements/"] --> B["spend import statements/new.csv"]
     B --> C{"Anything flagged<br/>'couldn't be categorized'?"}
     C -- yes --> D["spend review"]
-    C -- no --> E["spend dashboard / summary"]
+    C -- no --> E["spend dashboard"]
     D --> E
     E --> F{"Something looks<br/>miscategorized?"}
     F -- "one merchant" --> G["spend set MERCHANT CATEGORY"]
@@ -309,7 +288,7 @@ Edit the category list or the `[descriptions]` Jev reads in `categories.toml`. C
 ### Checking Jev against keyword rules
 
 ```bash
-uv run python -m spending.jev_eval [--no-save]
+uv run python -m spending.jev_eval
 ```
 
 Imports don't use keyword rules. The `[rules]` in `categories.toml` (copied from the example: national chains and generic words like `TRANSIT` or `UNIVERSITY`) are kept only as labels we already trust, to show Jev works. Every stored merchant a rule matches is sent to Jev (redacted, same as an import; payment rows stay local), and the eval reports how often Jev agrees, per category, and where it doesn't. A confident disagreement often means the rule is too broad. Rule keywords are case-insensitive substrings, for example:
@@ -318,7 +297,7 @@ Imports don't use keyword rules. The `[rules]` in `categories.toml` (copied from
 "Dining" = ["STARBUCKS", "CHIPOTLE", "BLUE OWL"]
 ```
 
-Answers are saved for the dashboard (skip with `--no-save`) and never change your transactions. It costs about $0.002 for 60 merchants.
+It only prints its results: nothing is saved, and your transactions and review suggestions don't change. It costs about $0.002 for 60 merchants.
 
 See [jev-review.md](documents/jev-review.md) for what Jev is, the latest results, and how it compares with a chat LLM.
 
@@ -328,7 +307,7 @@ See [jev-review.md](documents/jev-review.md) for what Jev is, the latest results
 |---|---|
 | `No transactions found` | Make sure it's the CSV export (not PDF) and that the file has a `"Date","Amount",...` header row. |
 | `categories.toml not found` | `cp categories.example.toml categories.toml` (setup step 3). |
-| `OPENROUTER_KEY is not set` | Add it to `.env`, or run with `--no-llm`. |
+| `OPENROUTER_KEY is not set` (from `spend review`) | Add it to `.env`. Imports and bank sync work without it, leaving new merchants for review. |
 | `N request(s) failed` | Network or API error. Those merchants become `Other`; re-run the import later (duplicates are skipped) or use `spend review`. |
 | Many merchants `below confidence` | Improve the category `[descriptions]` in `categories.toml` and run `spend review --resort`, or lower `JEV_MIN_CONFIDENCE` in `.env`. |
 | Lots of `Other` that would fit a category you don't have | Add it with `+` in `spend review`; see [Adding a category](#adding-a-category). |

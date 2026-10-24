@@ -59,7 +59,7 @@ Paths marked "git-ignored" belong to each user and are never committed.
 └── tests/                      offline tests; fakes.py is a fake Plaid
 ```
 
-- **`data/`**: `spending.db` (SQLite) is created on first import, with the tables `transactions`, `merchant_memory`, `jev_answers`, `jev_evals` and `plaid_items`, each commented in `db.py`. `plaid-tokens.json` holds the Plaid access token, only where there's no OS keyring (e.g. WSL). The folder and its files are created owner-only (700 / 600).
+- **`data/`**: `spending.db` (SQLite) is created on first import, with the tables `transactions`, `merchant_memory`, `jev_answers` and `plaid_items`, each commented in `db.py`. `plaid-tokens.json` holds the Plaid access token, only where there's no OS keyring (e.g. WSL). The folder and its files are created owner-only (700 / 600).
 - **`src/spending/.streamlit/config.toml`** applies however the dashboard is started: it listens only on `127.0.0.1`, accepts only the hostnames `localhost` and `127.0.0.1` (blocks DNS rebinding), and sends no usage statistics.
 - **`categories.toml`** is copied from the example at setup, and `+` in `spend review` adds to it. Its `[rules]` are only labels for `jev_eval`; imports don't use them. Each git worktree needs its own copy, or set `SPENDING_CATEGORIES` in `.env` to share one.
 
@@ -70,7 +70,7 @@ A feature starts as a proposal in `documents/`: the doc holds the design, and a 
 | Proposal | Status | About |
 |---|---|---|
 | [checking-ideas.md](documents/checking-ideas.md) | open ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)) | Import the checking account too (rent, investing, P2P), pairing card payments so nothing counts twice. First to verify: what a real checking CSV looks like. |
-| [limit-flags.md](documents/limit-flags.md) | open ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)) | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm`. |
+| [limit-flags.md](documents/limit-flags.md) | open ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)) | Fewer CLI flags. Removed: `import --dry-run` and `--no-llm`, `spend summary`, `jev_eval --no-save`. Left: replace `review --resort` with change detection. |
 | [plaid-ideas.md](documents/plaid-ideas.md) | open ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)), MVP built | Pull transactions through Plaid. Built: sync when the dashboard opens, sign-in, `spend unlink`. Not yet: Plaid's categories, `spend sync`, a schedule. First to verify: how long MSUFCU's consent lasts. |
 
 [jev-review.md](documents/jev-review.md) isn't a proposal but a reference that stays: what Jev is, how accurate it is against the keyword rules, and its speed and cost against a chat LLM.
@@ -86,7 +86,7 @@ flowchart TB
     subgraph USER["👤 User layer"]
         direction LR
         U1["statements/<br/>CSV exports"]
-        U2["spend CLI<br/>import · review · set · summary · unlink"]
+        U2["spend CLI<br/>import · review · set · unlink"]
         U3["Dashboard<br/>(browser)"]
     end
 
@@ -191,7 +191,7 @@ flowchart TD
     G -- no --> O["Other (fallback)<br/>guess saved to jev_answers<br/>→ spend review"]
     MN & R & M & L & O --> H["db.py: INSERT OR IGNORE<br/>deduplicated by hash or Plaid's transaction id"]
     H --> I[("data/spending.db")]
-    I --> J["spend summary / dashboard"]
+    I --> J["spend dashboard"]
 ```
 
 ## Privacy boundary

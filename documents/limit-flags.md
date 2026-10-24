@@ -1,14 +1,20 @@
 # Limit CLI Flags
 
-**Status: open** ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)). Not started.
+**Status: open** ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)). Removed so far: `import --dry-run` and `--no-llm`, `spend summary` (with `--month`) and `jev_eval --no-save`. Left: `review --resort`.
 
 ## Motivation
 - Keep the CLI small: every flag is something to learn, document and test.
 - Each command should do the obvious thing without needing a flag.
+- Day to day, the user only runs `spend dashboard`, which syncs with the bank. The other commands are for setup, CSV imports and fixing categories.
 
 ## Current flags
 
-Every flag is described in [README.md](../README.md#commands): `import --dry-run` and `--no-llm`, `review --all` and `--resort [CATEGORY]`, `set --all-matches`, and `summary --month`. All of them date from the MVP except `review --resort`, added in [#2](https://github.com/alessandrofelici/spending-tracker/issues/2). Settings that aren't flags go in `.env` (see [.env.example](../.env.example)).
+Every flag is described in [README.md](../README.md#commands): `review --all` and `--resort [CATEGORY]`, and `set --all-matches`. Settings that aren't flags go in `.env` (see [.env.example](../.env.example)).
+
+## Done
+- **`import --dry-run` and `--no-llm`:** removed. Without an OpenRouter key, import leaves new merchants for `spend review` by itself, as bank sync does. The offline tests replaced the preview as the check before commits.
+- **`spend summary` and `--month`:** removed; the dashboard shows the same totals.
+- **`jev_eval --no-save`:** removed with the `jev_evals` table. Nothing read the saved answers once the dashboard's Categorization tab was gone, so the eval only prints.
 
 ## Specifications
 
@@ -23,17 +29,9 @@ Every flag is described in [README.md](../README.md#commands): `import --dry-run
 - A description-only change maps to today's plain `--resort`: retry `Other` with the current categories.
 - Moving merchants into a new category is decided by Jev's answer, so more than one new category at once has to work (today's `resort()` takes one).
 
-### 2. Merge `--dry-run` and `--no-llm` (optional)
-- Today `--dry-run` alone still sends merchants to Jev but saves nothing, so it costs requests for a preview.
-- Option: make `--dry-run` always offline, and drop `--no-llm`.
-  - Lost: importing for real without Jev, and previewing what Jev would say.
-  - Alternative: keep `--no-llm`, and only make `--dry-run` imply it.
-
-### 3. Keep the rest
+### 2. Keep the rest
 - `--all`: no other way to spot-check Jev's results.
 - `--all-matches`: a safety catch against setting many merchants by accident.
-- `--month`: basic.
 
 ## Open questions
 - If `--resort` goes, is the "Re-sort now?" prompt enough, or should a re-sort also happen automatically on `import` after a category change?
-- Is there any use for previewing Jev's answers (`--dry-run` with Jev) worth keeping?
