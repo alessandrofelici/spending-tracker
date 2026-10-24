@@ -16,6 +16,7 @@ from .classify import (
     criteria_key,
     load_config,
     load_criteria,
+    openrouter_key,
 )
 from .parser import parse_csv, transaction_ids
 from .pipeline import categorize_rows, save_rows
@@ -23,6 +24,10 @@ from .pipeline import categorize_rows, save_rows
 
 def cmd_import(args) -> None:
     conn = db.connect()
+    # Without a key, new merchants go to review instead of Jev, like bank sync.
+    use_llm = openrouter_key() is not None
+    if not use_llm:
+        print("No OPENROUTER_KEY in .env: new merchants are left for `spend review`.")
     for path in args.files:
         print(f"{path.name}:")
         txns = parse_csv(path)
@@ -31,16 +36,8 @@ def cmd_import(args) -> None:
             continue
 
         rows, answers = categorize_rows(
-            conn, txns, transaction_ids(txns), path.name, use_llm=not args.no_llm
+            conn, txns, transaction_ids(txns), path.name, use_llm=use_llm
         )
-
-        if args.dry_run:
-            for r in rows:
-                print(
-                    f"  {r['date']}  {r['amount']:>9.2f}  {r['category']:<18} [{r['source']}]  {r['description']}"
-                )
-            continue
-
         added = save_rows(conn, rows, answers)
         conn.commit()
         months = sorted({r["month"] for r in rows})
@@ -55,12 +52,6 @@ def cmd_import(args) -> None:
 def cmd_review(args) -> None:
     conn = db.connect()
     categories = load_config()
-    if args.resort is not None:
-        new = args.resort or None
-        if new is not None and new not in categories:
-            sys.exit(f"Unknown category. Choose from: {', '.join(categories)}")
-        resort(conn, categories, new)
-        return
     sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source = 'fallback'"
     if args.all:
         sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source != 'manual'"
@@ -71,13 +62,12 @@ def cmd_review(args) -> None:
     review_merchants(conn, categories, merchants)
 
 
-def resort(conn, categories: list[str], new: str | None = None) -> None:
-    """Ask Jev again now that the categories changed. Confident answers for
-    uncategorized merchants are applied (with `new`, only answers for `new`; the
-    rest become review suggestions), and so are confident moves into `new`
-    for merchants Jev had categorized itself (it picked without `new` before).
-    Moves of merchants you set by hand are only proposed. Payment rows are
-    never sent."""
+def resort(conn, categories: list[str], new: str) -> None:
+    """Ask Jev again now that category `new` was added. Confident answers for
+    `new` are applied to uncategorized merchants (other answers become review
+    suggestions), and so are confident moves into `new` for merchants Jev had
+    categorized itself (it picked without `new` before). Moves of merchants you
+    set by hand are only proposed. Payment rows are never sent."""
     merchants = conn.execute(
         """SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s,
                   MIN(category) category, MIN(source = 'fallback') fallback,
@@ -90,13 +80,9 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
     stale = {
         m["merchant"]: m["d"]
         for m in merchants
-        # Without a new category only Other's answers are used.
-        if (new or m["fallback"])
-        and (
-            (a := answers.get(m["merchant"])) is None
-            or a["asked_with"] != key
-            or a["outcome"] == "failed"
-        )
+        if (a := answers.get(m["merchant"])) is None
+        or a["asked_with"] != key
+        or a["outcome"] == "failed"
     }
     if stale:
         print(
@@ -116,14 +102,14 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
         if m["fallback"]:
             # Adding a category shifts Jev's confidence across all of them, so
             # an answer for an old category only becomes a suggestion.
-            if sure and new and a["choice"] != new:
+            if sure and a["choice"] != new:
                 suggested.append(m)
             elif sure:
                 db.place_by_llm(conn, m["merchant"], a["choice"])
                 placed.append(f"    {m['d']} -> {a['choice']}")
             else:
                 left.append(m)
-        elif sure and new and a["choice"] == new and m["category"] != new:
+        elif sure and a["choice"] == new and m["category"] != new:
             if m["manual"]:
                 to_confirm.append(m)
             else:
@@ -136,7 +122,7 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
     # Every count below is a share of the line above it, so they add up.
     print(f"In '{FALLBACK}': {len(placed) + len(suggested) + len(left)} merchant(s)")
     if placed:
-        print(f"  {len(placed)} placed by Jev{f' in {new!r}' if new else ''}:")
+        print(f"  {len(placed)} placed by Jev in {new!r}:")
         print("\n".join(placed))
     if suggested:
         print(
@@ -152,21 +138,18 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
             f", no answer for {silent}" if silent else ""
         )
         print(f"  {len(left)} still '{FALLBACK}' ({why}); review below")
-    if new:
-        total = len(moved) + len(to_confirm) + kept
-        print(f"Already categorized: {total} merchant(s)")
-        if moved:
-            print(
-                f"  {len(moved)} moved by Jev (it picked them before '{new}' existed):"
-            )
-            print("\n".join(moved))
-        if to_confirm:
-            print(
-                f"  {len(to_confirm)} you set by hand that Jev thinks belong in"
-                f" '{new}'; confirm below"
-            )
-        if kept:
-            print(f"  {kept} keep their category")
+    total = len(moved) + len(to_confirm) + kept
+    print(f"Already categorized: {total} merchant(s)")
+    if moved:
+        print(f"  {len(moved)} moved by Jev (it picked them before '{new}' existed):")
+        print("\n".join(moved))
+    if to_confirm:
+        print(
+            f"  {len(to_confirm)} you set by hand that Jev thinks belong in"
+            f" '{new}'; confirm below"
+        )
+    if kept:
+        print(f"  {kept} keep their category")
     if to_confirm or suggested or left:
         print()
         review_merchants(conn, categories, to_confirm + suggested + left)
@@ -277,31 +260,6 @@ def cmd_set(args) -> None:
     conn.commit()
 
 
-def cmd_summary(args) -> None:
-    conn = db.connect()
-    month = (
-        args.month
-        or (conn.execute("SELECT MAX(month) FROM transactions").fetchone()[0])
-    )
-    if not month:
-        print("No data yet. Import a statement first.")
-        return
-    rows = conn.execute(
-        """SELECT category, COUNT(*) n, SUM(amount) total FROM transactions
-           WHERE month = ? AND category != 'Payments & Credits'
-           GROUP BY category ORDER BY total DESC""",
-        (month,),
-    ).fetchall()
-    grand = sum(r["total"] for r in rows)
-    print(f"Spending for {month}\n")
-    for r in rows:
-        share = r["total"] / grand * 100 if grand else 0
-        print(
-            f"  {r['category']:<20} {r['total']:>10.2f}  {share:5.1f}%  ({r['n']} txns)"
-        )
-    print(f"  {'Total':<20} {grand:>10.2f}")
-
-
 def cmd_dashboard(args) -> None:
     app = Path(__file__).with_name("dashboard.py")
     subprocess.run([sys.executable, "-m", "streamlit", "run", str(app)], check=False)
@@ -356,16 +314,6 @@ def main() -> None:
 
     s = sub.add_parser("import", help="Import MSUFCU transaction CSV(s)")
     s.add_argument("files", nargs="+", type=Path)
-    s.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="Only use your choices and remembered merchants",
-    )
-    s.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be imported without saving",
-    )
     s.set_defaults(func=cmd_import)
 
     s = sub.add_parser("review", help="Fix uncategorized merchants interactively")
@@ -373,14 +321,6 @@ def main() -> None:
         "--all",
         action="store_true",
         help="Review every non-manual merchant, not just uncategorized",
-    )
-    s.add_argument(
-        "--resort",
-        nargs="?",
-        const="",
-        metavar="CATEGORY",
-        help="Ask Jev again with the current categories: places what it can of 'Other'"
-        " automatically, and proposes moves into CATEGORY (e.g. one you just added)",
     )
     s.set_defaults(func=cmd_review)
 
@@ -393,10 +333,6 @@ def main() -> None:
         help="Apply to every merchant containing the text",
     )
     s.set_defaults(func=cmd_set)
-
-    s = sub.add_parser("summary", help="Print a month's spending by category")
-    s.add_argument("--month")
-    s.set_defaults(func=cmd_summary)
 
     s = sub.add_parser("dashboard", help="Open the charts dashboard")
     s.set_defaults(func=cmd_dashboard)

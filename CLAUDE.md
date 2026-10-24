@@ -1,26 +1,23 @@
 # Spending Tracker: instructions for Claude
 
-See README.md for usage and STRUCTURE.md for layout. Feature proposals live in `documents/`; their work is tracked as GitHub issues (see [GitHub issues](#github-issues-filing-them-for-the-developer)).
+README.md covers usage. CONTRIBUTING.md covers dev setup, the layout, and the feature proposals in `documents/`, whose work is tracked as GitHub issues (see [GitHub issues](#github-issues)).
 
-## Git: committing on the developer's behalf
+## Bank data stays private
+
+The repo is public. Keep bank data out of everything published: commits, PR titles and descriptions, issues and docs. That means no merchant names, amounts, dates or account numbers from `statements/` or the database, and no `.env` contents or keys. Describe real transactions generically (e.g. "a warehouse-club gas station") or use made-up examples like the README's (`PETSMART 1234 LANSING MI`).
+
+## Git
 
 You are **authorized to commit without asking**, within these rules. Anything outside them still needs the developer's OK.
 
-### When to commit
+- **One commit per logical change** (a bug fix, one step of a feature, a doc update), made as soon as it's done and verified. Don't batch a whole task into one commit, and don't mix unrelated changes.
+- **Verify first.** Before committing code, run at least `uv run pre-commit run --all-files` (Ruff, ty and the bank-data/secret guards; the same hooks run on `git commit`) and `uv run pytest` (offline), plus whatever proves the change works (e.g. importing a made-up CSV into a throwaway `SPENDING_DB`). Never commit something you know is broken; say so instead.
+- **Commit only your own changes.** Leave edits the developer already had in the working tree unstaged. Stage paths explicitly (`git add <path>`, not `-A` or `.`), and check `git diff --cached --stat` before each commit.
+- **Never commit** `.env`, real API keys or anything matching `sk-or-`; `categories.toml` (the developer's own, git-ignored; change default categories in `categories.example.toml`); bank data (`statements/`, `data/`, `*.csv`, `*.pdf`, `*.db`; never `git add -f` them); or generated files (`.venv/`, `__pycache__/`).
+- **Never commit directly to `main`.** On `main`, branch first: `git switch -c <type>/<short-name>`, e.g. `feat/jev-review`, `fix/set-matching`. In a git worktree, commit on that worktree's branch.
+- **Push, and open or merge pull requests, only when the developer asks**, and never push to `main`. Never amend, rebase or reset commits; ask the developer instead. (`.claude/settings.json` allows push and `gh pr …` so they aren't blocked when asked, not as permission to use them unprompted; amend, rebase, `reset --hard` and switching to `main` prompt.)
 
-- **One commit per logical change**: commit as soon as a self-contained change is done and verified (a bug fix, one step of a feature, a doc update). Don't batch a whole task into one commit, and don't mix unrelated changes in one commit.
-- **Verify first.** Before committing code, at minimum run `uv run pre-commit run --all-files` (Ruff, ty and the bank-data/secret guards; the same hooks run on `git commit`) and `uv run pytest` (offline; data safety, storage and bank sync), plus whatever check proves the change works (e.g. a `--dry-run --no-llm` import against sample data). Never commit something you know is broken; say so instead.
-- **Only commit your own changes.** If the working tree already had uncommitted edits from the developer when you started, leave them unstaged. Stage files explicitly (`git add <path>`), not `git add -A` / `git add .`.
-
-### Where
-
-- **Never commit directly to `main`.** If you're on `main`, create a branch first: `git switch -c <type>/<short-name>`, e.g. `feat/jev-review`, `fix/set-matching`, `chore/pre-commit-hooks`.
-- In a git worktree, commit on that worktree's branch.
-- **Push only when the developer asks** (e.g. to open a PR), and never to `main`. Never amend, rebase or reset commits; ask the developer instead. (Push is allowed in `.claude/settings.json`; amend, rebase, `reset --hard` and switching to `main` prompt.)
-- **Open or merge pull requests only when the developer asks.** `gh pr …` is allowed in `.claude/settings.json` so it isn't blocked when asked, not as permission to do it unprompted.
-- **Keep bank data out of anything published**: commits, PR titles and descriptions, and docs. No merchant names, amounts or dates from real statements; describe them generically (e.g. "a warehouse-club gas station") or use made-up examples.
-
-### Message format: Conventional Commits
+### Commit messages: Conventional Commits
 
 ```
 <type>(<scope>): <summary>
@@ -29,13 +26,11 @@ You are **authorized to commit without asking**, within these rules. Anything ou
 ```
 
 - **type**: `feat` · `fix` · `docs` · `refactor` · `test` · `chore` (tooling, deps, config) · `perf`
-- **scope** (optional, use when it fits): `classify` · `parser` · `cli` · `db` · `dashboard` · `config` (categories.example.toml, .env.example) · `docs` · `hooks` · `deps`
+- **scope** (optional, when it fits): `classify` · `parser` · `cli` · `db` · `dashboard` · `config` (categories.example.toml, .env.example) · `docs` · `hooks` · `deps`
 - **summary**: imperative mood ("add", not "added"), lowercase, no trailing period, ≤ 72 characters
-- **body**: wrap at 72 characters. Explain *why*, not what the diff already shows. Skip it only for trivial changes.
-- **Breaking changes** (schema change, renamed CLI flag or setting): add `!` after the type/scope and a `BREAKING CHANGE:` line in the body.
+- **body**: wrapped at 72 characters. Explain *why*, not what the diff already shows. Skip it only for trivial changes.
+- **Breaking changes** (schema change, renamed CLI flag or setting): `!` after the type/scope and a `BREAKING CHANGE:` line in the body.
 - **No `Co-Authored-By` or other Claude attribution trailers.**
-
-Examples:
 
 ```
 fix(cli): match merchants by substring in `spend set`
@@ -51,41 +46,14 @@ BREAKING CHANGE: databases created before this change must be
 re-imported; old rows have no account or kind.
 ```
 
-### Never commit
+## GitHub issues
 
-- `.env`, real API keys, or anything matching `sk-or-`
-- `categories.toml`: it's the developer's own, git-ignored. Change default categories in `categories.example.toml`.
-- Bank data: `statements/`, `data/`, `*.csv`, `*.pdf`, `*.db` (they're git-ignored; never use `git add -f` on them)
-- Generated files: `.venv/`, `__pycache__/`
+You can create issues on `alessandrofelici/spending-tracker` with the `gh` CLI (already logged in). Every issue is public.
 
-Before each commit, check `git diff --cached --stat` to confirm only the intended files are staged.
-
-## GitHub issues: filing them for the developer
-
-You can create issues on `alessandrofelici/spending-tracker` with the `gh` CLI (already logged in). **The repo is public**, so every issue is public.
-
-### When
-
-- **Only when the developer asks** ("open an issue for X", "turn documents/foo.md into an issue"). Don't file issues on your own initiative; suggest one instead.
-- Usually an issue tracks a proposal in `documents/`: the doc holds the design, the issue tracks the work. Check `gh issue list --state all` first so you don't file a duplicate.
-
-### How
-
-```bash
-gh issue create --title "<title>" --label <label> --body-file <file>
-```
-
-- Write the body to a file in your scratchpad and pass `--body-file`, so quoting can't mangle Markdown.
-- **title**: short and imperative, like a commit summary without the type ("Limit CLI flags", "Make categories.toml per-user").
-- **label**: `enhancement` (feature), `bug`, or `documentation`. Use the existing labels; don't create new ones.
-- **body**:
-  - one or two sentences on the problem and why it matters
-  - a link to the proposal, e.g. `[documents/limit-flags.md](https://github.com/alessandrofelici/spending-tracker/blob/main/documents/limit-flags.md)`, instead of copying it
-  - the decisions or open questions still to settle, as a task list (`- [ ]`)
-- After creating it, add the issue link to the doc's **Status** line (e.g. `**Status: open** ([#3](https://github.com/alessandrofelici/spending-tracker/issues/3)).`) and commit that as a `docs` change.
-- When a pull request finishes an issue's work, put `Closes #N` in its description so merging closes the issue.
-
-### Never
-
-- Never put bank data in an issue: no real merchant names from `statements/` or the database, amounts, account numbers, `.env` contents or keys. Use made-up examples like the README's (`PETSMART 1234 LANSING MI`).
-- Never close, edit, delete or comment on existing issues without the developer's OK. (`gh issue create`, `edit`, `close`, `comment` prompt; `delete` is blocked.)
+- **File one only when the developer asks** ("open an issue for X", "turn documents/foo.md into an issue"); otherwise suggest one. Check `gh issue list --state all` first so you don't file a duplicate. An issue usually tracks a proposal in `documents/`: the doc holds the design, the issue tracks the work.
+- **Create it** with `gh issue create --title "<title>" --label <label> --body-file <file>`, writing the body to a file in your scratchpad so quoting can't mangle Markdown.
+  - **title**: short and imperative, like a commit summary without the type ("Limit CLI flags", "Make categories.toml per-user").
+  - **label**: an existing one, `enhancement` (feature), `bug` or `documentation`. Don't create labels.
+  - **body**: one or two sentences on the problem and why it matters; a link to the proposal instead of a copy of it, e.g. `[documents/checking-ideas.md](https://github.com/alessandrofelici/spending-tracker/blob/main/documents/checking-ideas.md)`; and the decisions or open questions still to settle, as a task list (`- [ ]`).
+- **Afterwards**, add the issue link to the doc's Status line (e.g. `**Status: open** ([#3](https://github.com/alessandrofelici/spending-tracker/issues/3)).`) and commit that as a `docs` change. When a pull request finishes an issue's work, put `Closes #N` in its description so merging closes the issue.
+- **Never close, edit, delete or comment on existing issues** without the developer's OK. (`gh issue create`, `edit`, `close` and `comment` prompt; `delete` is blocked.)

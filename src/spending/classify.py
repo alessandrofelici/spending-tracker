@@ -177,8 +177,11 @@ def criteria_key(criteria: Mapping[str, str | None]) -> str:
 
 
 def openrouter_key() -> str | None:
+    """The OpenRouter key, or None when it's missing or left empty in .env."""
     load_dotenv(ROOT / ".env")
-    return os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    return (
+        os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY") or None
+    )
 
 
 def classify_with_llm(

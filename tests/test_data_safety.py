@@ -7,6 +7,7 @@ import shutil
 import stat
 import subprocess
 import tomllib
+from argparse import Namespace
 from datetime import date
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import pytest
 import yaml
 from fakes import ACCESS_TOKEN, txn
 
-from spending import classify, db, plaid_source
+from spending import classify, cli, db, plaid_source
 from spending.parser import Transaction, parse_csv, transaction_ids
 from spending.pipeline import categorize_rows, save_rows
 
@@ -121,6 +122,29 @@ def test_csv_import_keeps_only_date_amount_and_description(conn, db_path, tmp_pa
 
 
 # --- What reaches Jev (OpenRouter) ---------------------------------------------
+
+
+@pytest.mark.parametrize("key", ["", None])
+def test_import_without_a_key_never_asks_jev(monkeypatch, db_path, tmp_path, key):
+    if key is None:
+        monkeypatch.delenv("OPENROUTER_KEY")
+        monkeypatch.delenv("OPENROUTER_API_KEY")
+    monkeypatch.setattr(classify, "load_dotenv", lambda _path: None)
+
+    def refuse(*_args):
+        raise AssertionError("Jev was asked without a key")
+
+    monkeypatch.setattr(classify, "classify_with_llm", refuse)
+    connect = db.connect
+    monkeypatch.setattr(db, "connect", lambda: connect(db_path))
+    path = tmp_path / "export.csv"
+    path.write_text(CSV)
+
+    cli.cmd_import(Namespace(files=[path]))
+    conn = connect(db_path)
+    sources = {r[0] for r in conn.execute("SELECT source FROM transactions")}
+    conn.close()
+    assert sources == {"payment", "fallback"}  # the purchase is left for review
 
 
 @pytest.mark.parametrize(

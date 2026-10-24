@@ -1,7 +1,8 @@
 # Checking Ideas
 
-> **Status:** Proposal ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)), separate from the MVP (credit card only). Nothing here is built yet.
-> **Goal:** Show *all* money going out, including what never touches the credit card, without counting anything twice.
+**Status: open** ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)). Nothing here is built yet.
+
+**Goal:** Show *all* money going out, including what never touches the credit card, without counting anything twice.
 
 ## Motivation
 - Want to account for money which goes through checking account
@@ -109,6 +110,18 @@ What the LLM would still see: redacted merchant names from checking debit-card p
 - **Savings rate:** (income − spending) / income, as a stat tile with month-over-month change.
 - **Account filter:** credit / checking / all.
 - **Reconciliation panel:** unmatched card payments and flagged transfers, so the user can confirm or fix them.
+
+## Changes by file
+
+| File | Change |
+|---|---|
+| `src/spending/cli.py` | `import --account`, reconciliation in `review` |
+| `src/spending/parser.py` | Accept checking exports; local rules for income / P2P |
+| `src/spending/classify.py` | Never send income or P2P rows to the LLM |
+| `src/spending/db.py` | `account`, `kind`, `match_id` columns |
+| `src/spending/dashboard.py` | Cash flow, savings rate, account filter, reconciliation panel |
+| `categories.example.toml` | Rent & Housing, Investing, Income, Transfers, People (P2P) |
+| New: `payees.toml` | Local payee → category map for Zelle/Venmo/checks |
 
 ## Phases
 

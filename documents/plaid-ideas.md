@@ -1,7 +1,8 @@
 # Plaid Ideas
 
-> **Status:** MVP built ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)): the dashboard syncs when it opens and signs in through Plaid Link. Connected to MSUFCU for real (Trial plan, October 2026): the card's transactions come through. Security follow-ups ([#18](https://github.com/alessandrofelici/spending-tracker/issues/18)) are handled; see the [Security](#security) table. See [What the MVP does](#what-the-mvp-does); the rest of this doc is the original design.
-> **Goal:** Replace the manual "download CSV → `spend import`" step with an automatic monthly pull of transactions.
+**Status: open** ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)). The MVP is built: the dashboard syncs when it opens and signs in through Plaid Link. Connected to MSUFCU for real (Trial plan, October 2026): the card's transactions come through. Security follow-ups ([#18](https://github.com/alessandrofelici/spending-tracker/issues/18)) are handled; see the [Security](#security) table. See [What the MVP does](#what-the-mvp-does); the rest of this doc is the original design.
+
+**Goal:** Replace the manual "download CSV → `spend import`" step with an automatic monthly pull of transactions.
 
 ## What the MVP does
 
