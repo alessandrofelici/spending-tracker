@@ -16,6 +16,7 @@ from .classify import (
     criteria_key,
     load_config,
     load_criteria,
+    openrouter_key,
 )
 from .parser import parse_csv, transaction_ids
 from .pipeline import categorize_rows, save_rows
@@ -23,6 +24,10 @@ from .pipeline import categorize_rows, save_rows
 
 def cmd_import(args) -> None:
     conn = db.connect()
+    # Without a key, new merchants go to review instead of Jev, like bank sync.
+    use_llm = openrouter_key() is not None
+    if not use_llm:
+        print("No OPENROUTER_KEY in .env: new merchants are left for `spend review`.")
     for path in args.files:
         print(f"{path.name}:")
         txns = parse_csv(path)
@@ -31,16 +36,8 @@ def cmd_import(args) -> None:
             continue
 
         rows, answers = categorize_rows(
-            conn, txns, transaction_ids(txns), path.name, use_llm=not args.no_llm
+            conn, txns, transaction_ids(txns), path.name, use_llm=use_llm
         )
-
-        if args.dry_run:
-            for r in rows:
-                print(
-                    f"  {r['date']}  {r['amount']:>9.2f}  {r['category']:<18} [{r['source']}]  {r['description']}"
-                )
-            continue
-
         added = save_rows(conn, rows, answers)
         conn.commit()
         months = sorted({r["month"] for r in rows})
@@ -356,16 +353,6 @@ def main() -> None:
 
     s = sub.add_parser("import", help="Import MSUFCU transaction CSV(s)")
     s.add_argument("files", nargs="+", type=Path)
-    s.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="Only use your choices and remembered merchants",
-    )
-    s.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be imported without saving",
-    )
     s.set_defaults(func=cmd_import)
 
     s = sub.add_parser("review", help="Fix uncategorized merchants interactively")
