@@ -53,8 +53,7 @@ Paths marked "git-ignored" belong to each user and are never committed.
 │   ├── db.py                   SQLite schema, migrations, queries
 │   ├── plaid_source.py         Plaid client, /transactions/sync, token storage
 │   ├── bank_sync.py            the dashboard's sync on open and sign-in card
-│   ├── dashboard.py            Streamlit app and its Spending tab
-│   ├── jev_tab.py              the Categorization tab
+│   ├── dashboard.py            Streamlit app: the spending charts
 │   └── jev_eval.py             `python -m spending.jev_eval`: Jev vs the example keyword rules
 ├── statements/                 the user's CSV exports (git-ignored)
 └── tests/                      offline tests; fakes.py is a fake Plaid
@@ -74,7 +73,7 @@ A feature starts as a proposal in `documents/`: the doc holds the design, and a 
 | [limit-flags.md](documents/limit-flags.md) | open ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)) | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm`. |
 | [plaid-ideas.md](documents/plaid-ideas.md) | open ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)), MVP built | Pull transactions through Plaid. Built: sync when the dashboard opens, sign-in, `spend unlink`. Not yet: Plaid's categories, `spend sync`, a schedule. First to verify: how long MSUFCU's consent lasts. |
 
-[jev-review.md](documents/jev-review.md) isn't a proposal but a reference that stays: what Jev is, how accurate it is against the keyword rules, and its speed and cost against a chat LLM. The dashboard's Categorization tab links to it.
+[jev-review.md](documents/jev-review.md) isn't a proposal but a reference that stays: what Jev is, how accurate it is against the keyword rules, and its speed and cost against a chat LLM.
 
 Not covered by a proposal yet:
 
@@ -103,7 +102,7 @@ flowchart TB
         D2["parser.py"]
         D3["classify.py<br/>+ pipeline.py"]
         D4["db.py"]
-        D5["dashboard.py<br/>+ jev_tab.py"]
+        D5["dashboard.py"]
         D6["jev_eval.py"]
         D7["bank_sync.py<br/>+ plaid_source.py"]
     end
@@ -134,7 +133,6 @@ flowchart LR
     classify["classify.py<br/>manual → payments → memory → Jev"]
     db["db.py<br/>SQLite schema + queries"]
     dash["dashboard.py<br/>Streamlit + Plotly"]
-    jevtab["jev_tab.py<br/>Categorization tab"]
     jeval["jev_eval.py<br/>Jev vs example keyword rules"]
     pipeline["pipeline.py<br/>categorize → store"]
     banksync["bank_sync.py<br/>sync on open, sign-in"]
@@ -157,14 +155,12 @@ flowchart LR
     classify --> db
     dash --> banksync
     dash --> db
-    dash --> jevtab
     banksync --> plaidsrc
     banksync --> db
     plaidsrc --> parser
     plaidsrc --> pipeline
     plaidsrc --> db
     plaidsrc --> plaid
-    jevtab --> db
     jeval --> classify
     jeval --> db
     db --> sqlite

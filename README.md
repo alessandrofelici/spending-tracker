@@ -189,22 +189,12 @@ Spending for 2026-04
 uv run spend dashboard
 ```
 
-Starts a local Streamlit app at `http://127.0.0.1:8501` and opens it in your browser (stop with Ctrl+C). If [bank sync](#bank-sync-plaid) is set up, it first gets new transactions from your bank, or asks you to sign in. Only this computer can open it (see [Security and privacy](#security-and-privacy)). It has two tabs.
-
-**Spending:**
+Starts a local Streamlit app at `http://127.0.0.1:8501` and opens it in your browser (stop with Ctrl+C). If [bank sync](#bank-sync-plaid) is set up, it first gets new transactions from your bank, or asks you to sign in. Only this computer can open it (see [Security and privacy](#security-and-privacy)). It shows:
 
 - month picker with total spent, change vs the previous month, transaction count and biggest category
 - spending by category for the month
 - month-by-month stacked bars (top 7 categories, the rest grouped)
 - top 10 merchants and a filterable transaction table, with each row's categorization **source**
-
-**Categorization:** how your transactions got their categories (all months):
-
-- the share decided by Jev, you, or still needing review, by transactions, merchants and dollars (plus keyword rules, for rows imported before rules stopped categorizing)
-- why merchants need review (Jev unsure, Jev picked Other, request failed)
-- Jev's confidence distribution against `JEV_MIN_CONFIDENCE`
-- the latest [agreement check](#checking-jev-against-keyword-rules) against the example keyword rules
-- how long a typical month takes with Jev (measured) vs a chat LLM (estimated; see [jev-review.md](documents/jev-review.md))
 
 ## Bank sync (Plaid)
 
@@ -300,7 +290,7 @@ Each transaction takes the first answer it gets:
    - The answer can only be one of your categories (checked again locally). If Jev's confidence is below `JEV_MIN_CONFIDENCE` (default 0.6), or it picks `Other`, the merchant goes to `spend review` instead of being guessed. Its guess is kept and offered as the default in review, and the merchant isn't asked about again until you change the categories or their descriptions.
    - Requests are restricted to zero-data-retention endpoints (`provider.zdr`).
    - Cost: about $0.00003 per merchant (input tokens only).
-   - Every answer, including unsure and failed ones, is kept with its confidence and latency (the `jev_answers` table) for review suggestions and the dashboard's Categorization tab.
+   - Every answer, including unsure and failed ones, is kept with its confidence and latency (the `jev_answers` table) for review suggestions.
 5. **Fallback:** anything left becomes `Other` and shows up in `spend review`.
 
 The **source** column in the dashboard's transaction table tells you which step decided each row:
