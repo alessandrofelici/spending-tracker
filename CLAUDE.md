@@ -1,6 +1,6 @@
 # Spending Tracker: instructions for Claude
 
-See README.md for usage and STRUCTURE.md for layout. Feature proposals live in `documents/`; their work is tracked as GitHub issues (see [GitHub issues](#github-issues-filing-them-for-the-developer)).
+See README.md for usage and CONTRIBUTING.md for dev setup and layout. Feature proposals live in `documents/`; their work is tracked as GitHub issues (see [GitHub issues](#github-issues-filing-them-for-the-developer)).
 
 ## Git: committing on the developer's behalf
 

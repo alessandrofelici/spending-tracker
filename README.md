@@ -351,24 +351,4 @@ See `documents/jev-review.md` for what Jev is, the latest results, and how it co
 
 ## Development
 
-Commits are checked by [pre-commit](https://pre-commit.com) hooks: Ruff (lint + format), ty (type checking), whitespace fixes, and guards that block bank data, databases, `.env` and API keys. The tools are dev dependencies, so their versions are pinned in `uv.lock`.
-
-```bash
-uv sync                             # installs the dev tools too
-uv run pre-commit install           # once per clone; covers all git worktrees
-uv run pre-commit run --all-files   # check everything by hand
-```
-
-If a hook fixes files (Ruff, whitespace), the commit stops. Review the changes, `git add` them and commit again. In VS Code, the [ty extension](https://marketplace.visualstudio.com/items?itemName=astral-sh.ty) shows the same type errors the hook checks for.
-
-### Tests
-
-Run the tests before and after any big change, especially to storage, bank sync or categorizing:
-
-```bash
-uv run pytest
-```
-
-They check that your data stays safe (the database and token file are private, tokens never reach the database, only redacted new merchants reach Jev, only keys and the token reach Plaid, bank data is git-ignored and blocked by the commit hook, the dashboard only listens on this machine), that imports never duplicate or overwrite your choices, and that bank sync handles new, changed, removed and pending transactions, paging and errors.
-
-They run offline in a few seconds and never touch your data: each test gets its own throwaway database, the example categories, no API keys, and a fake Plaid (`tests/fakes.py`) with made-up transactions. Any real network request fails the test.
+Setup, tests, the code layout and feature proposals are in [CONTRIBUTING.md](CONTRIBUTING.md).
