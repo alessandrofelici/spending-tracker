@@ -274,31 +274,6 @@ def cmd_set(args) -> None:
     conn.commit()
 
 
-def cmd_summary(args) -> None:
-    conn = db.connect()
-    month = (
-        args.month
-        or (conn.execute("SELECT MAX(month) FROM transactions").fetchone()[0])
-    )
-    if not month:
-        print("No data yet. Import a statement first.")
-        return
-    rows = conn.execute(
-        """SELECT category, COUNT(*) n, SUM(amount) total FROM transactions
-           WHERE month = ? AND category != 'Payments & Credits'
-           GROUP BY category ORDER BY total DESC""",
-        (month,),
-    ).fetchall()
-    grand = sum(r["total"] for r in rows)
-    print(f"Spending for {month}\n")
-    for r in rows:
-        share = r["total"] / grand * 100 if grand else 0
-        print(
-            f"  {r['category']:<20} {r['total']:>10.2f}  {share:5.1f}%  ({r['n']} txns)"
-        )
-    print(f"  {'Total':<20} {grand:>10.2f}")
-
-
 def cmd_dashboard(args) -> None:
     app = Path(__file__).with_name("dashboard.py")
     subprocess.run([sys.executable, "-m", "streamlit", "run", str(app)], check=False)
@@ -380,10 +355,6 @@ def main() -> None:
         help="Apply to every merchant containing the text",
     )
     s.set_defaults(func=cmd_set)
-
-    s = sub.add_parser("summary", help="Print a month's spending by category")
-    s.add_argument("--month")
-    s.set_defaults(func=cmd_summary)
 
     s = sub.add_parser("dashboard", help="Open the charts dashboard")
     s.set_defaults(func=cmd_dashboard)
