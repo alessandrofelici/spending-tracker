@@ -13,7 +13,7 @@
 | `import` | `--dry-run` | Show what would be imported without saving | MVP |
 | `import` | `--no-llm` | Don't ask Jev; unknown merchants become `Other` | MVP |
 | `review` | `--all` | Also review merchants categorized by a rule or by Jev | MVP |
-| `review` | `--resort [CATEGORY]` | Ask Jev again: apply its answers for `Other`, and move merchants into CATEGORY | extend-review |
+| `review` | `--resort [CATEGORY]` | Ask Jev again: apply its answers for `Other`, and move merchants into CATEGORY | [#2](https://github.com/alessandrofelici/spending-tracker/issues/2) |
 | `set` | `--all-matches` | Apply to every merchant matching the text | MVP |
 | `summary` | `--month YYYY-MM` | Pick the month | MVP |
 

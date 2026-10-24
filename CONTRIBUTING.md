@@ -12,7 +12,7 @@ uv run pre-commit install           # once per clone; covers all git worktrees
 uv run pre-commit run --all-files   # check everything by hand
 ```
 
-If a hook fixes files (Ruff, whitespace), the commit stops. Review the changes, `git add` them and commit again. In VS Code, the [ty extension](https://marketplace.visualstudio.com/items?itemName=astral-sh.ty) shows the same type errors the hook checks for.
+If a hook fixes files (Ruff, whitespace), the commit stops. Review the changes, `git add` them and commit again. ty checks the whole project on each commit, since type errors cross files. In VS Code, use the [ty extension](https://marketplace.visualstudio.com/items?itemName=astral-sh.ty) instead of Pylance: it shows the same errors the hook checks for, and the two overlap heavily anyway.
 
 ### Tests
 
@@ -71,10 +71,11 @@ Paths marked "git-ignored" belong to each user and are never committed.
 | `documents/plaid-ideas.md` | In progress | Pull transactions via Plaid instead of downloading CSVs. MVP built and connected to MSUFCU: the dashboard syncs when it opens and signs in through Plaid Link; `spend unlink` disconnects. Not yet: Plaid's categories, `spend sync`, a schedule. |
 | `documents/jev-review.md` | Docs | What Jev is, how `classify.py` uses it, agreement eval results, and speed/cost vs a chat LLM (with how it was estimated) |
 | `documents/checking-ideas.md` | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
-| `documents/extend-review.md` | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
-| `documents/resort-issues.md` | Resolved | Analysis of two re-sort problems found on real data: summary counts that didn't add up, and 98%-confident moves that still asked for approval |
 | `documents/limit-flags.md` | Proposal | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm` |
-| `documents/per-user-categories.md` | Implemented | `categories.toml` is each user's git-ignored copy of `categories.example.toml`, made at setup; how to upgrade an existing checkout |
+
+Not covered by a proposal yet:
+
+- When `categories.example.toml` gains a category, existing users' copies don't get it. Is a release note enough, or should `spend` point out example categories missing from your copy?
 
 ## Layers
 
