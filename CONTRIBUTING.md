@@ -66,12 +66,15 @@ Paths marked "git-ignored" belong to each user and are never committed.
 
 ## Proposals
 
-| Path | Status | Notes |
+A feature starts as a proposal in `documents/`: the doc holds the design, and a GitHub issue tracks the work. The doc's first line is its status, `**Status: open** ([#N](…))`, with a short note on what's built. When the work is done, move what still matters into README.md or this file and delete the proposal; its history stays in git and in the issue. This table is the only list of proposals, so update it when you add or delete one.
+
+| Proposal | Status | About |
 |---|---|---|
-| `documents/plaid-ideas.md` | In progress | Pull transactions via Plaid instead of downloading CSVs. MVP built and connected to MSUFCU: the dashboard syncs when it opens and signs in through Plaid Link; `spend unlink` disconnects. Not yet: Plaid's categories, `spend sync`, a schedule. |
-| `documents/jev-review.md` | Docs | What Jev is, how `classify.py` uses it, agreement eval results, and speed/cost vs a chat LLM (with how it was estimated) |
-| `documents/checking-ideas.md` | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
-| `documents/limit-flags.md` | Proposal | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm` |
+| [checking-ideas.md](documents/checking-ideas.md) | open ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)) | Import the checking account too (rent, investing, P2P), pairing card payments so nothing counts twice. First to verify: what a real checking CSV looks like. |
+| [limit-flags.md](documents/limit-flags.md) | open ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)) | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm`. |
+| [plaid-ideas.md](documents/plaid-ideas.md) | open ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)), MVP built | Pull transactions through Plaid. Built: sync when the dashboard opens, sign-in, `spend unlink`. Not yet: Plaid's categories, `spend sync`, a schedule. First to verify: how long MSUFCU's consent lasts. |
+
+[jev-review.md](documents/jev-review.md) isn't a proposal but a reference that stays: what Jev is, how accurate it is against the keyword rules, and its speed and cost against a chat LLM. The dashboard's Categorization tab links to it.
 
 Not covered by a proposal yet:
 
@@ -215,99 +218,3 @@ flowchart LR
     end
     LOCAL ~~~ SENT
 ```
-
-## Planned features
-
-Both proposals live in `documents/`. The Plaid one has a working MVP (blue below); the rest of both is **not built yet**. They extend the MVP rather than replace it: CSV import stays as the no-third-party fallback.
-
-```mermaid
-flowchart LR
-    classDef mvp fill:#2a78d6,color:#fff,stroke:#1c5cab
-    classDef plan fill:#898781,color:#fff,stroke:#52514e
-
-    subgraph MVP["MVP (built)"]
-        direction TB
-        m1["Card CSV<br/>spend import"]:::mvp
-        m2["classify.py<br/>manual → payments → memory → Jev"]:::mvp
-        m3[("spending.db<br/>card only")]:::mvp
-        m4["Dashboard<br/>spending by category"]:::mvp
-        m1 --> m2 --> m3 --> m4
-    end
-
-    subgraph PLAID["documents/plaid-ideas.md"]
-        direction TB
-        p1["Sign in via Plaid Link<br/>in the dashboard"]:::mvp
-        p2["/transactions/sync<br/>on dashboard open"]:::mvp
-        p3["Plaid category step<br/>before the LLM"]:::plan
-        p4["spend sync / unlink<br/>+ scheduler"]:::plan
-        p1 --> p2
-        p2 --> p4
-    end
-
-    subgraph CHK["documents/checking-ideas.md"]
-        direction TB
-        c1["Checking CSV<br/>spend import --account checking"]:::plan
-        c2["kind column<br/>spend · income · investment ·<br/>card_payment · transfer"]:::plan
-        c3["Reconciliation<br/>pair card payments ±5 days"]:::plan
-        c4["Cash flow + savings rate"]:::plan
-        c1 --> c2 --> c3 --> c4
-    end
-
-    p2 -. "replaces manual download" .-> m1
-    p3 -. "new step" .-> m2
-    p2 -. "same Plaid Item covers checking" .-> c1
-    c2 -. "schema change" .-> m3
-    c4 -. "new views" .-> m4
-```
-
-### Changes by file
-
-✅ = built (Plaid MVP); the rest is proposed.
-
-| File | Plaid | Checking |
-|---|---|---|
-| `src/spending/cli.py` | ✅ `unlink`; `sync` still proposed (signing in and syncing live in the dashboard) | `import --account`, reconciliation in `review` |
-| `src/spending/parser.py` | ✅ New sibling `plaid_source.py` (Plaid → `Transaction`), via `pipeline.py` like a CSV | Accept checking exports; local rules for income / P2P |
-| `src/spending/classify.py` | Plaid category mapping before the LLM | Never send income or P2P rows to the LLM |
-| `src/spending/db.py` | ✅ `source_kind` column, `plaid_items` table (`id` is Plaid's transaction id, so no `external_id`) | `account`, `kind`, `match_id` columns |
-| `src/spending/dashboard.py` | ✅ Sync on open, "Connect your bank" card, last-sync caption (`bank_sync.py`) | Cash flow, savings rate, account filter, reconciliation panel |
-| `categories.toml` | — | Rent & Housing, Investing, Income, Transfers, People (P2P) |
-| New: `payees.toml` | — | Local payee → category map for Zelle/Venmo/checks |
-| `.env` / OS keyring | ✅ `PLAID_*` in `.env`; `access_token` in the keyring, or `data/plaid-tokens.json` (0600) where there's none | — |
-
-### Open questions blocking each
-
-| Proposal | First thing to verify |
-|---|---|
-| Plaid | How long MSUFCU's OAuth consent lasts before you have to sign in again. (Whether the **credit line** comes through is answered: it does.) |
-| Checking | What does a real checking CSV look like (payroll, Zelle, card-payment rows)? |
-
-## Current status (2026-10-07)
-
-```mermaid
-flowchart LR
-    classDef active fill:#1baf7a,color:#fff,stroke:#0f7a54
-    classDef ready fill:#2a78d6,color:#fff,stroke:#1c5cab
-    classDef pending fill:#eda100,color:#000,stroke:#b07800
-    classDef idea fill:#898781,color:#fff,stroke:#52514e
-
-    s1["CSV parser"]:::active
-    s2["Jev categorizer"]:::active
-    s3["CLI + dashboard"]:::ready
-    s4["First real import<br/>(data/ is empty)"]:::pending
-    s5["Initial git commit<br/>(everything untracked)"]:::pending
-    s6["Plaid automation<br/>documents/plaid-ideas.md"]:::idea
-    s7["Checking account<br/>documents/checking-ideas.md"]:::idea
-
-    s1 --> s2 --> s3 --> s4
-    s4 -.-> s6
-    s4 -.-> s7
-    s6 -. "shares Plaid Item" .-> s7
-```
-
-| Legend | Meaning |
-|---|---|
-| 🟢 Active | Recently changed (PDF → CSV switch, payment redaction) and verified on the real export |
-| 🔵 Ready | Built and smoke-tested on sample data |
-| 🟡 Pending | Next step |
-| ⚪ Idea | Proposal written, not started (`documents/`) |
