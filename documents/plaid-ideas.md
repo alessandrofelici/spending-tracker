@@ -1,7 +1,28 @@
 # Plaid Ideas
 
-> **Status:** Proposal ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)), separate from the MVP (CSV import). Nothing here is built yet.
+> **Status:** MVP built ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)): the dashboard syncs when it opens and signs in through Plaid Link. Connected to MSUFCU for real (Trial plan, October 2026): the card's transactions come through. Security follow-ups ([#18](https://github.com/alessandrofelici/spending-tracker/issues/18)) are handled; see the [Security](#security) table. See [What the MVP does](#what-the-mvp-does); the rest of this doc is the original design.
 > **Goal:** Replace the manual "download CSV → `spend import`" step with an automatic monthly pull of transactions.
+
+## What the MVP does
+
+- **On open:** `spend dashboard` calls `/transactions/sync` once per browser session (`bank_sync.py` → `plaid_source.py`). New rows go through `pipeline.py`, the same categorize → store path as `spend import`. Then the chart cache is cleared and a caption says what changed.
+- **Not signed in:** a "Connect your bank" card opens Plaid Link through an `st.components.v2` component. It isn't sandboxed, so Link's overlay and the bank's OAuth pop-up work, and no redirect URI is needed on desktop web. Link's public token comes back to Python and is exchanged there.
+- **Sign in again:** `ITEM_LOGIN_REQUIRED` (also `PASSWORD_RESET_REQUIRED`, `ACCESS_NOT_GRANTED`) opens Link in update mode, which keeps the same Item. On the Trial plan the 10 Items are a lifetime count: `/item/remove` doesn't free a slot ([billing docs](https://plaid.com/docs/account/billing/)).
+- **Disconnecting:** `spend unlink` calls `/item/remove`, then deletes the token; synced transactions stay. A new sign-in revokes the login it replaces, after saving the new one. If Plaid can't be reached, the old login is kept and the revoke is retried each time the dashboard opens. A login whose token is missing can't be revoked from here, so the note tells you to remove the app at the bank.
+- Without `PLAID_CLIENT_ID` / `PLAID_SECRET` in `.env`, nothing changes: CSV only.
+- **MSUFCU's wording through Plaid** differs from the CSV export. A purchase comes as `Credit Card Advance <merchant> Date MM/DD/YY <reference> <nnnn> Card #<last 4>`, and the card payment as `ACH Loan Payment <account> ...`. `WRAPPER_RE` in `plaid_source.py` keeps only the merchant part, so descriptions match the CSV's: remembered merchants and manual choices carry over, and the date never reaches Jev. `ACH LOAN PAYMENT` is in `PAYMENT_MARKERS`, so the payment stays local. The first real sync, before either fix, had no merchant matching CSV history and sent dates and the payment, redacted, to Jev.
+
+Where it differs from the design below:
+
+| Design | MVP | Why |
+|---|---|---|
+| `spend link` / `sync` / `unlink`, scheduler | Link and sync live in the dashboard; `spend unlink` exists | Sync on open is what makes the data current; `spend sync` and a schedule can come later |
+| `external_id` and `account` columns | `id` holds Plaid's `transaction_id`; no `account` column | Only credit accounts are stored: type `credit`, or `loan` / `line of credit` in case MSUFCU reports the card that way |
+| Access token in the OS keyring | Keyring, falling back to `data/plaid-tokens.json` (created 0600) | WSL has no Secret Service, so the keyring alone wouldn't work on the dev machine |
+| Cutover = last CSV date | Newest stored date (CSV or Plaid), fixed when the bank is linked (`plaid_items.cutover`) | A new login gets new transaction ids, so rows synced before reconnecting must be skipped too; later CSV imports don't move it |
+| Plaid category step | Not yet | The payment check, memory and Jev handle it; `original_description` with MSUFCU's wrapper removed matches the CSV, so memory carries over |
+
+Still open: the PFC step, `spend sync`, a schedule, and how long MSUFCU's consent lasts before signing in again.
 
 ## Automation
 - Retrieve statement monthly
@@ -32,7 +53,7 @@ flowchart LR
     end
     A2 --> C["parser → Transaction objects"]
     B3 --> C2["plaid_source.py → Transaction objects"]
-    C --> D["classify.py<br/>rules → memory → Plaid category → LLM"]
+    C --> D["classify.py<br/>payments → memory → Plaid category → LLM"]
     C2 --> D
     D --> E[("data/spending.db")]
     E --> F["Dashboard"]
@@ -97,7 +118,7 @@ Plaid returns `personal_finance_category` (about 95% fill rate) on every transac
 
 ```mermaid
 flowchart TD
-    T["Transaction"] --> R{"Keyword rule?"}
+    T["Transaction"] --> R{"Card payment<br/>or refund?"}
     R -- yes --> Done["Category"]
     R -- no --> Mem{"Merchant memory?"}
     Mem -- yes --> Done
@@ -127,9 +148,15 @@ Draft mapping. New Plaid customers get **PFCv2** by default (since December 3, 2
 | Concern | Mitigation |
 |---|---|
 | `PLAID_CLIENT_ID` / `PLAID_SECRET` | `.env` (already git-ignored), same as `OPENROUTER_KEY` |
-| `access_token` | OS keyring (`keyring` package), never in SQLite, `.env` or logs |
+| `access_token` | OS keyring (`keyring` package), or `data/plaid-tokens.json` (0600) where there is none; never in SQLite, `.env` or logs |
 | Over-broad access | In Link, select only the accounts we need; request only the `transactions` product |
 | Lost or retired machine | `spend unlink` calls `/item/remove`, which revokes the token at Plaid |
+| Replaced logins | A new sign-in revokes the login it replaces; if Plaid can't be reached, the revoke is retried each time the dashboard opens |
+| Dashboard reachable from other machines | Bound to `127.0.0.1` (`src/spending/.streamlit/config.toml`). With WSL's mirrored networking the default would be the LAN; Windows' firewall for WSL blocks inbound too |
+| A web page reaching the dashboard (DNS rebinding) | `server.allowedHosts` is `localhost` and `127.0.0.1`: any other `Host` gets 403 on the websocket |
+| Other accounts reading the data | `data/` and the database are created 700 / 600; `.env` and older setups need `chmod` by hand (README) |
+| Usage statistics | Streamlit's `browser.gatherUsageStats` is off |
+| WSL: token and secret both in plaintext files (accepted) | Anything running as you can read both, Windows programs included. The token is useless without the secret, and Transactions is read-only. If the machine is compromised: rotate the secret in the Plaid Dashboard and call `/item/access_token/invalidate` |
 | Data sent to the LLM | Unchanged: only redacted merchant names, and fewer of them thanks to the PFC step |
 
 ## Proposed CLI
@@ -151,9 +178,9 @@ Scheduling: a `systemd --user` timer or crontab entry running `uv run spend sync
 
 ## Open questions
 
-- [ ] Does MSUFCU expose the credit line through Plaid, or only share/checking accounts?
+- [x] Does MSUFCU expose the credit line through Plaid, or only share/checking accounts? Yes: the first real sync pulled the card's purchases and payment.
 - [ ] How long does MSUFCU's OAuth consent last before it needs re-linking?
-- [ ] Are the Trial plan limits enough long term (10 Items; check for request caps)?
+- [x] Are the Trial plan limits enough long term (10 Items; check for request caps)? Yes for one bank. Plaid documents no request cap or expiry for Trial (the per-product call cap belonged to the retired Limited Production plan), but the 10 Items are lifetime, so re-authentication goes through update mode instead of a new link.
 - [ ] Should Plaid replace CSV import entirely, or should CSV stay as a fallback? (Recommend keeping it: no account, no third party.)
 
 ## Sources

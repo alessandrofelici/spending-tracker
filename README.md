@@ -4,6 +4,8 @@ Import MSUFCU credit card transaction CSVs (Online Banking → Download Transact
 
 Everything runs locally. The only thing that ever leaves your machine is a redacted merchant name sent to [Jev](https://openrouter.ai/docs/guides/community/jev) (via OpenRouter) for stores it has never seen (see [How categorization works](#how-categorization-works)).
 
+Optionally, the dashboard can pull your card's transactions from the bank through Plaid instead of you downloading CSVs (see [Bank sync](#bank-sync-plaid)).
+
 ## First-time setup
 
 ```bash
@@ -39,7 +41,8 @@ All commands run as `uv run spend <command>`. Add `--help` to any of them for th
 | [`review`](#spend-review) | Walk through uncategorized merchants, pick or create categories | ✅ |
 | [`set`](#spend-set) | Set one merchant's category directly | ✅ |
 | [`summary`](#spend-summary) | Print one month's spending by category | — |
-| [`dashboard`](#spend-dashboard) | Open the charts in your browser | — |
+| [`dashboard`](#spend-dashboard) | Open the charts in your browser, after syncing with your bank if [set up](#bank-sync-plaid) | only with bank sync |
+| [`unlink`](#disconnecting) | Disconnect your bank: revoke Plaid's access and delete the token | ✅ |
 
 ### `spend import`
 
@@ -185,7 +188,7 @@ Spending for 2026-04
 uv run spend dashboard
 ```
 
-Starts a local Streamlit app and opens it in your browser (stop with Ctrl+C). It has two tabs.
+Starts a local Streamlit app at `http://127.0.0.1:8501` and opens it in your browser (stop with Ctrl+C). If [bank sync](#bank-sync-plaid) is set up, it first gets new transactions from your bank, or asks you to sign in. Only this computer can open it (see [Security and privacy](#security-and-privacy)). It has two tabs.
 
 **Spending:**
 
@@ -201,6 +204,60 @@ Starts a local Streamlit app and opens it in your browser (stop with Ctrl+C). It
 - Jev's confidence distribution against `JEV_MIN_CONFIDENCE`
 - the latest [agreement check](#checking-jev-against-keyword-rules) against the example keyword rules
 - how long a typical month takes with Jev (measured) vs a chat LLM (estimated; see `documents/jev-review.md`)
+
+## Bank sync (Plaid)
+
+Optional. Instead of downloading CSVs, the dashboard can pull your card's transactions from the bank through [Plaid](https://plaid.com). Each time `spend dashboard` opens, it asks Plaid what changed since last time and runs new transactions through the same [categorization](#how-categorization-works) as `spend import`: your choices, the local payment check, remembered merchants, then Jev. Then it shows them.
+
+### Setup
+
+1. Create a free account at [dashboard.plaid.com](https://dashboard.plaid.com/signup). The sandbox (Plaid's test banks) works right away. For your real bank, apply for the free **Trial plan** ("Personal use").
+2. Copy the keys from [Developers → Keys](https://dashboard.plaid.com/developers/keys) into `.env`, and make the file private, since it now holds a bank-access secret (`chmod 600 .env`):
+   ```bash
+   PLAID_CLIENT_ID=...
+   PLAID_SECRET=...     # the secret for the environment below; each has its own
+   PLAID_ENV=sandbox    # or production, for your real bank
+   ```
+3. Run `uv run spend dashboard` and click **Sign in to your bank** in the "Connect your bank" card. Plaid's window opens: pick your bank and sign in on the bank's own page. When it asks which accounts to share, pick only your credit card. In the sandbox, sign in with `user_good` / `pass_good` (and `1234` if asked for a code).
+
+The first sync takes a few seconds while Plaid fetches your history. From then on, a line under the title says what each sync found:
+
+```
+Synced with MSUFCU just now: 3 new, 0 updated, 0 removed. 1 to categorize with `spend review`.
+```
+
+### What it stores
+
+- **Credit accounts only:** the card, or a credit line. Checking and savings are skipped (listed as "Not tracked"): until [checking support](documents/checking-ideas.md) exists, card payments would count twice.
+- **Posted transactions only:** pending ones wait until they post.
+- **No double counting:** when you connect your bank, the newest date already stored becomes the cutover, and Plaid's transactions up to that date are skipped. That covers your CSV imports, and transactions synced before you disconnected and reconnected. After connecting, don't import CSVs covering later dates; those transactions would be counted twice.
+- **Descriptions like the CSV's:** through Plaid, MSUFCU wraps each purchase as `Credit Card Advance <merchant> Date MM/DD/YY <reference> <nnnn> Card #<last 4>`. Only the merchant part is kept, so merchants you've already categorized are recognized, and no date goes to Jev.
+- **Changes from the bank:** if Plaid reports a new amount or description, the row is updated and keeps its category. A transaction Plaid removes is deleted. Rows from CSV imports are never touched.
+
+### Signing in again
+
+Now and then your bank ends the connection. The dashboard then says your bank needs you to sign in again and shows a **Sign in again** button, which reconnects the same login (Plaid's update mode). Use it rather than starting over: on the Trial plan each new connection takes one of 10 slots, and disconnecting never frees one.
+
+If you do connect again from scratch, the app revokes the login it replaces at Plaid. If Plaid can't be reached right then, the new connection still works, and the dashboard retries the revoke each time it opens.
+
+### Disconnecting
+
+```bash
+uv run spend unlink
+```
+
+Asks first, then revokes the app's access at Plaid and deletes the access token. Transactions already synced stay. Some banks that sign you in through their own page still list the app as connected afterwards, so check your bank's connected-apps settings too. Connecting again later counts as a new connection on the Trial plan.
+
+### Security and privacy
+
+- Your bank password goes only to your bank's own page, opened by Plaid. This app never sees it.
+- Plaid can read the accounts you share, so share only the card.
+- Plaid gives the app an **access token** for your login. It's kept in your OS keyring (Windows Credential Manager, macOS Keychain or a Linux keyring). Where there is none, as in WSL, it goes in `data/plaid-tokens.json`, readable only by your user. The dashboard says which one it used when you connect. The token never goes to the browser.
+- The dashboard only accepts connections from this computer (`127.0.0.1`), and only under the names `localhost` and `127.0.0.1`, so a web page can't reach it by pointing its own domain at your machine (DNS rebinding). It also doesn't send Streamlit's usage statistics. These settings are in `src/spending/.streamlit/config.toml`.
+- `data/` and the database are created readable only by you. For a setup from before this, tighten them by hand: `chmod 700 data && chmod 600 data/* .env`.
+- Jev still only gets redacted merchant descriptions, exactly as with a CSV import.
+
+Not built yet: syncing on a schedule without opening the dashboard, and using Plaid's own categories as a hint. See `documents/plaid-ideas.md`.
 
 ## The monthly cycle
 
@@ -227,12 +284,14 @@ In practice, monthly:
 4. **`spend dashboard`** to look at the month.
 5. **Correct** anything wrong with `spend set` (with `--all-matches` for a pattern). Corrections stick, so each month needs less fixing.
 
+With [bank sync](#bank-sync-plaid), steps 1 and 2 happen by themselves whenever you open the dashboard.
+
 ## How categorization works
 
 Each transaction takes the first answer it gets:
 
 1. **Your manual choices** from `review` / `set` take priority.
-2. **Card payments and refunds** (`ACH Pmt:<account numbers>`, `HB XFR Pmt`, `Credit Voucher`, ...) go to `Payments & Credits`, matched locally. They never reach the model.
+2. **Card payments and refunds** (`ACH Pmt:<account numbers>`, `HB XFR Pmt`, `Credit Voucher`, `ACH Loan Payment` from bank sync, ...) go to `Payments & Credits`, matched locally. They never reach the model.
 3. **Merchant memory:** a merchant the LLM already categorized on an earlier import.
 4. **Jev via OpenRouter,** only for merchants never seen before. Jev is TypeSafe's typed decision model: it doesn't write text, it picks one of your categories and returns a probability for each.
    - Only the Description column goes out, with any token containing 3+ digits (account/reference/phone numbers) masked. Amount, balance, draft number, dates and the account line at the top of the export are never sent.
@@ -283,6 +342,12 @@ See `documents/jev-review.md` for what Jev is, the latest results, and how it co
 | Many merchants `below confidence` | Improve the category `[descriptions]` in `categories.toml` and run `spend review --resort`, or lower `JEV_MIN_CONFIDENCE` in `.env`. |
 | Lots of `Other` that would fit a category you don't have | Add it with `+` in `spend review`; see [Adding a category](#adding-a-category). |
 | `spend set` says no merchant matches | Use part of the name as it appears in the dashboard's description column. |
+| No "Connect your bank" card | `PLAID_CLIENT_ID` and `PLAID_SECRET` aren't both in `.env`. Restart the dashboard after editing `.env`. |
+| The dashboard won't open from another device | By design: it only accepts connections from this computer (see [Security and privacy](#security-and-privacy)). |
+| `Couldn't start the sign-in` (client_id or secret) | Wrong keys, or `PLAID_ENV` doesn't match the secret: sandbox and production each have their own. |
+| `Plaid is still getting your transactions` | A new connection's first sync isn't ready yet. Open the dashboard again in a few minutes. |
+| `Not tracked: Checking ...` | Only credit accounts are stored, so nothing is lost. Next time you sign in, share only the card. |
+| Your bank `needs you to sign in again` | Click **Sign in again** (see [Signing in again](#signing-in-again)). |
 
 ## Development
 
@@ -295,3 +360,15 @@ uv run pre-commit run --all-files   # check everything by hand
 ```
 
 If a hook fixes files (Ruff, whitespace), the commit stops. Review the changes, `git add` them and commit again. In VS Code, the [ty extension](https://marketplace.visualstudio.com/items?itemName=astral-sh.ty) shows the same type errors the hook checks for.
+
+### Tests
+
+Run the tests before and after any big change, especially to storage, bank sync or categorizing:
+
+```bash
+uv run pytest
+```
+
+They check that your data stays safe (the database and token file are private, tokens never reach the database, only redacted new merchants reach Jev, only keys and the token reach Plaid, bank data is git-ignored and blocked by the commit hook, the dashboard only listens on this machine), that imports never duplicate or overwrite your choices, and that bank sync handles new, changed, removed and pending transactions, paging and errors.
+
+They run offline in a few seconds and never touch your data: each test gets its own throwaway database, the example categories, no API keys, and a fake Plaid (`tests/fakes.py`) with made-up transactions. Any real network request fails the test.

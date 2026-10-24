@@ -19,7 +19,7 @@ DB_PATH = Path(os.environ.get("SPENDING_DB", ROOT / "data" / "spending.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS transactions (
-    id          TEXT PRIMARY KEY,   -- stable hash, makes re-importing a statement a no-op
+    id          TEXT PRIMARY KEY,   -- stable hash (CSV) or Plaid's transaction_id; re-importing is a no-op
     month       TEXT NOT NULL,      -- YYYY-MM of the transaction date
     date        TEXT NOT NULL,      -- transaction date, YYYY-MM-DD
     description TEXT NOT NULL,      -- raw text from the statement
@@ -27,9 +27,20 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount      REAL NOT NULL,      -- positive = charge, negative = payment/refund
     category    TEXT NOT NULL,
     source      TEXT NOT NULL,      -- payment | memory | llm | manual | fallback (rule: older imports)
-    statement   TEXT NOT NULL       -- CSV file it was imported from
+    statement   TEXT NOT NULL,      -- CSV file it was imported from, or "Plaid"
+    source_kind TEXT NOT NULL DEFAULT 'csv'  -- csv | plaid
 );
 CREATE INDEX IF NOT EXISTS idx_txn_month ON transactions(month);
+
+-- Bank logins linked through Plaid. The access token is a credential, so it
+-- lives in the OS keyring (or a private file next to this database), never here.
+CREATE TABLE IF NOT EXISTS plaid_items (
+    item_id     TEXT PRIMARY KEY,
+    institution TEXT,   -- bank name from Plaid Link
+    cursor      TEXT,   -- where the last /transactions/sync stopped; NULL = never synced
+    cutover     TEXT,   -- newest stored date when linked; Plaid rows up to it are skipped
+    last_synced TEXT    -- UTC, YYYY-MM-DD HH:MM:SS
+);
 
 -- Remembered merchant -> category decisions (from the LLM or from you),
 -- so each merchant only ever has to be classified once.
@@ -64,7 +75,10 @@ CREATE TABLE IF NOT EXISTS jev_evals (
 """
 
 # Columns added after a table was first created: (table, column, definition).
-MIGRATIONS = [("jev_answers", "latency_ms", "REAL")]
+MIGRATIONS = [
+    ("jev_answers", "latency_ms", "REAL"),
+    ("transactions", "source_kind", "TEXT NOT NULL DEFAULT 'csv'"),
+]
 
 # Payment rows used to be matched by a keyword rule (source 'rule'); give them
 # their own source so they stay out of Jev now that other rule rows don't.
@@ -75,7 +89,12 @@ DATA_MIGRATIONS = [
 
 
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Owner-only, like the Plaid token file: this is your bank data. SQLite gives
+    # its journal the database's permissions. An existing folder or file keeps
+    # its own (see the README for tightening an older setup).
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not path.exists():
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
@@ -173,11 +192,62 @@ def insert_transactions(conn: sqlite3.Connection, rows: list[dict]) -> int:
     before = conn.total_changes
     conn.executemany(
         """INSERT OR IGNORE INTO transactions
-           (id, month, date, description, merchant, amount, category, source, statement)
-           VALUES (:id, :month, :date, :description, :merchant, :amount, :category, :source, :statement)""",
+           (id, month, date, description, merchant, amount, category, source, statement, source_kind)
+           VALUES (:id, :month, :date, :description, :merchant, :amount, :category, :source, :statement, :source_kind)""",
         rows,
     )
     return conn.total_changes - before
+
+
+def update_plaid_transaction(conn: sqlite3.Connection, row: dict) -> bool:
+    """Apply a change Plaid reported to a stored row, keeping its category.
+    False if the row isn't stored."""
+    cur = conn.execute(
+        """UPDATE transactions
+           SET month = :month, date = :date, description = :description,
+               merchant = :merchant, amount = :amount
+           WHERE id = :id AND source_kind = 'plaid'""",
+        row,
+    )
+    return cur.rowcount > 0
+
+
+def delete_plaid_transactions(conn: sqlite3.Connection, ids: list[str]) -> int:
+    before = conn.total_changes
+    conn.executemany(
+        "DELETE FROM transactions WHERE id = ? AND source_kind = 'plaid'",
+        [(i,) for i in ids],
+    )
+    return conn.total_changes - before
+
+
+def get_plaid_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Newest first: that's the login the dashboard syncs."""
+    return conn.execute("SELECT * FROM plaid_items ORDER BY rowid DESC").fetchall()
+
+
+def add_plaid_item(
+    conn: sqlite3.Connection, item_id: str, institution: str | None
+) -> None:
+    """A new bank login. Plaid rows dated up to the newest stored transaction are
+    skipped, so nothing you already have is counted twice: CSV imports, or rows
+    synced through an earlier login (a new login's transaction ids differ)."""
+    conn.execute(
+        """INSERT INTO plaid_items (item_id, institution, cutover)
+           VALUES (?, ?, (SELECT MAX(date) FROM transactions))""",
+        (item_id, institution),
+    )
+
+
+def remove_plaid_item(conn: sqlite3.Connection, item_id: str) -> None:
+    conn.execute("DELETE FROM plaid_items WHERE item_id = ?", (item_id,))
+
+
+def save_plaid_cursor(conn: sqlite3.Connection, item_id: str, cursor: str) -> None:
+    conn.execute(
+        "UPDATE plaid_items SET cursor = ?, last_synced = datetime('now') WHERE item_id = ?",
+        (cursor, item_id),
+    )
 
 
 def set_merchant_category(

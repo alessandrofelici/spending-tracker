@@ -43,6 +43,7 @@ PAYMENTS = "Payments & Credits"
 # Card payments and refunds: matched locally so they never reach Jev.
 PAYMENT_MARKERS = (
     "ACH PMT",
+    "ACH LOAN PAYMENT",  # a card payment as MSUFCU words it through Plaid
     "XFR PMT",
     "CREDIT VOUCHER",
     "PAYMENT - THANK YOU",
@@ -175,13 +176,17 @@ def criteria_key(criteria: Mapping[str, str | None]) -> str:
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
+def openrouter_key() -> str | None:
+    load_dotenv(ROOT / ".env")
+    return os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
+
+
 def classify_with_llm(
     descriptions: dict[str, str], categories: list[str]
 ) -> dict[str, Answer]:
     """descriptions: merchant key -> example raw description. Returns an Answer for
     every merchant; only outcome == "confident" ones should be used as a category."""
-    load_dotenv(ROOT / ".env")
-    api_key = os.environ.get("OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    api_key = openrouter_key()
     if not api_key:
         raise RuntimeError("OPENROUTER_KEY is not set in .env")
     model = os.environ.get("JEV_MODEL", DEFAULT_MODEL)
