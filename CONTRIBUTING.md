@@ -70,10 +70,7 @@ A feature starts as a proposal in `documents/`: the doc holds the design, and a 
 | Proposal | Status | About |
 |---|---|---|
 | [checking-ideas.md](documents/checking-ideas.md) | open ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)) | Import the checking account too (rent, investing, P2P), pairing card payments so nothing counts twice. First to verify: what a real checking CSV looks like. |
-| [limit-flags.md](documents/limit-flags.md) | open ([#6](https://github.com/alessandrofelici/spending-tracker/issues/6)) | Fewer CLI flags. Removed: `import --dry-run` and `--no-llm`, `spend summary`, `jev_eval --no-save`. Left: replace `review --resort` with change detection. |
 | [plaid-ideas.md](documents/plaid-ideas.md) | open ([#8](https://github.com/alessandrofelici/spending-tracker/issues/8)), MVP built | Pull transactions through Plaid. Built: sync when the dashboard opens, sign-in, `spend unlink`. Not yet: Plaid's categories, `spend sync`, a schedule. First to verify: how long MSUFCU's consent lasts. |
-
-[jev-review.md](documents/jev-review.md) isn't a proposal but a reference that stays: what Jev is, how accurate it is against the keyword rules, and its speed and cost against a chat LLM.
 
 Not covered by a proposal yet:
 
