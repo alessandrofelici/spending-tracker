@@ -8,16 +8,7 @@
 
 ## Current flags
 
-| Command | Flag | What it does | Added |
-|---|---|---|---|
-| `import` | `--dry-run` | Show what would be imported without saving | MVP |
-| `import` | `--no-llm` | Don't ask Jev; unknown merchants become `Other` | MVP |
-| `review` | `--all` | Also review merchants categorized by a rule or by Jev | MVP |
-| `review` | `--resort [CATEGORY]` | Ask Jev again: apply its answers for `Other`, and move merchants into CATEGORY | [#2](https://github.com/alessandrofelici/spending-tracker/issues/2) |
-| `set` | `--all-matches` | Apply to every merchant matching the text | MVP |
-| `summary` | `--month YYYY-MM` | Pick the month | MVP |
-
-Settings in `.env` (not flags): `OPENROUTER_KEY`, `JEV_MODEL`, `JEV_MIN_CONFIDENCE`, `SPENDING_DB`, `SPENDING_CATEGORIES`.
+Every flag is described in [README.md](../README.md#commands): `import --dry-run` and `--no-llm`, `review --all` and `--resort [CATEGORY]`, `set --all-matches`, and `summary --month`. All of them date from the MVP except `review --resort`, added in [#2](https://github.com/alessandrofelici/spending-tracker/issues/2). Settings that aren't flags go in `.env` (see [.env.example](../.env.example)).
 
 ## Specifications
 
@@ -39,7 +30,7 @@ Settings in `.env` (not flags): `OPENROUTER_KEY`, `JEV_MODEL`, `JEV_MIN_CONFIDEN
   - Alternative: keep `--no-llm`, and only make `--dry-run` imply it.
 
 ### 3. Keep the rest
-- `--all`: no other way to spot-check rule and Jev results.
+- `--all`: no other way to spot-check Jev's results.
 - `--all-matches`: a safety catch against setting many merchants by accident.
 - `--month`: basic.
 

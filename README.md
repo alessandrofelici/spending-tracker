@@ -12,7 +12,8 @@ Optionally, the dashboard can pull your card's transactions from the bank throug
 # 1. Install dependencies (Python 3.11+, uv)
 uv sync
 
-# 2. Copy .env.example to .env, add an OpenRouter key
+# 2. Make your settings file, then add your OpenRouter key to it
+cp .env.example .env
 
 # 3. Make your own categories (TODO: edit them to fit your spending)
 cp categories.example.toml categories.toml
@@ -86,13 +87,13 @@ When Jev had a guess it wasn't confident enough to use, the prompt shows it with
 
 | Key | Action |
 |---|---|
-| `1`–`13` | Set that category |
+| A number | Set that category |
 | Enter | Accept Jev's `[suggestion]`, or skip if there is none |
 | `+` | Create a new category (see below) |
 | `s` | Skip this merchant |
 | `q` | Stop (choices so far are saved) |
 
-`--all` reviews every merchant that you haven't set by hand, including ones categorized by rules or the LLM. Use it after the first import to spot-check the LLM.
+`--all` reviews every merchant that you haven't set by hand, including ones Jev categorized. Use it after the first import to spot-check Jev.
 
 ```
    1. Groceries
@@ -203,7 +204,7 @@ Starts a local Streamlit app at `http://127.0.0.1:8501` and opens it in your bro
 - why merchants need review (Jev unsure, Jev picked Other, request failed)
 - Jev's confidence distribution against `JEV_MIN_CONFIDENCE`
 - the latest [agreement check](#checking-jev-against-keyword-rules) against the example keyword rules
-- how long a typical month takes with Jev (measured) vs a chat LLM (estimated; see `documents/jev-review.md`)
+- how long a typical month takes with Jev (measured) vs a chat LLM (estimated; see [jev-review.md](documents/jev-review.md))
 
 ## Bank sync (Plaid)
 
@@ -257,7 +258,7 @@ Asks first, then revokes the app's access at Plaid and deletes the access token.
 - `data/` and the database are created readable only by you. For a setup from before this, tighten them by hand: `chmod 700 data && chmod 600 data/* .env`.
 - Jev still only gets redacted merchant descriptions, exactly as with a CSV import.
 
-Not built yet: syncing on a schedule without opening the dashboard, and using Plaid's own categories as a hint. See `documents/plaid-ideas.md`.
+Not built yet: syncing on a schedule without opening the dashboard, and using Plaid's own categories as a hint. See [plaid-ideas.md](documents/plaid-ideas.md).
 
 ## The monthly cycle
 
@@ -329,7 +330,7 @@ Imports don't use keyword rules. The `[rules]` in `categories.toml` (copied from
 
 Answers are saved for the dashboard (skip with `--no-save`) and never change your transactions. It costs about $0.002 for 60 merchants.
 
-See `documents/jev-review.md` for what Jev is, the latest results, and how it compares with a chat LLM.
+See [jev-review.md](documents/jev-review.md) for what Jev is, the latest results, and how it compares with a chat LLM.
 
 ## Troubleshooting
 
