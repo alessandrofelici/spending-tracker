@@ -52,12 +52,6 @@ def cmd_import(args) -> None:
 def cmd_review(args) -> None:
     conn = db.connect()
     categories = load_config()
-    if args.resort is not None:
-        new = args.resort or None
-        if new is not None and new not in categories:
-            sys.exit(f"Unknown category. Choose from: {', '.join(categories)}")
-        resort(conn, categories, new)
-        return
     sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source = 'fallback'"
     if args.all:
         sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source != 'manual'"
@@ -68,13 +62,12 @@ def cmd_review(args) -> None:
     review_merchants(conn, categories, merchants)
 
 
-def resort(conn, categories: list[str], new: str | None = None) -> None:
-    """Ask Jev again now that the categories changed. Confident answers for
-    uncategorized merchants are applied (with `new`, only answers for `new`; the
-    rest become review suggestions), and so are confident moves into `new`
-    for merchants Jev had categorized itself (it picked without `new` before).
-    Moves of merchants you set by hand are only proposed. Payment rows are
-    never sent."""
+def resort(conn, categories: list[str], new: str) -> None:
+    """Ask Jev again now that category `new` was added. Confident answers for
+    `new` are applied to uncategorized merchants (other answers become review
+    suggestions), and so are confident moves into `new` for merchants Jev had
+    categorized itself (it picked without `new` before). Moves of merchants you
+    set by hand are only proposed. Payment rows are never sent."""
     merchants = conn.execute(
         """SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s,
                   MIN(category) category, MIN(source = 'fallback') fallback,
@@ -87,13 +80,9 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
     stale = {
         m["merchant"]: m["d"]
         for m in merchants
-        # Without a new category only Other's answers are used.
-        if (new or m["fallback"])
-        and (
-            (a := answers.get(m["merchant"])) is None
-            or a["asked_with"] != key
-            or a["outcome"] == "failed"
-        )
+        if (a := answers.get(m["merchant"])) is None
+        or a["asked_with"] != key
+        or a["outcome"] == "failed"
     }
     if stale:
         print(
@@ -113,14 +102,14 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
         if m["fallback"]:
             # Adding a category shifts Jev's confidence across all of them, so
             # an answer for an old category only becomes a suggestion.
-            if sure and new and a["choice"] != new:
+            if sure and a["choice"] != new:
                 suggested.append(m)
             elif sure:
                 db.place_by_llm(conn, m["merchant"], a["choice"])
                 placed.append(f"    {m['d']} -> {a['choice']}")
             else:
                 left.append(m)
-        elif sure and new and a["choice"] == new and m["category"] != new:
+        elif sure and a["choice"] == new and m["category"] != new:
             if m["manual"]:
                 to_confirm.append(m)
             else:
@@ -133,7 +122,7 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
     # Every count below is a share of the line above it, so they add up.
     print(f"In '{FALLBACK}': {len(placed) + len(suggested) + len(left)} merchant(s)")
     if placed:
-        print(f"  {len(placed)} placed by Jev{f' in {new!r}' if new else ''}:")
+        print(f"  {len(placed)} placed by Jev in {new!r}:")
         print("\n".join(placed))
     if suggested:
         print(
@@ -149,21 +138,18 @@ def resort(conn, categories: list[str], new: str | None = None) -> None:
             f", no answer for {silent}" if silent else ""
         )
         print(f"  {len(left)} still '{FALLBACK}' ({why}); review below")
-    if new:
-        total = len(moved) + len(to_confirm) + kept
-        print(f"Already categorized: {total} merchant(s)")
-        if moved:
-            print(
-                f"  {len(moved)} moved by Jev (it picked them before '{new}' existed):"
-            )
-            print("\n".join(moved))
-        if to_confirm:
-            print(
-                f"  {len(to_confirm)} you set by hand that Jev thinks belong in"
-                f" '{new}'; confirm below"
-            )
-        if kept:
-            print(f"  {kept} keep their category")
+    total = len(moved) + len(to_confirm) + kept
+    print(f"Already categorized: {total} merchant(s)")
+    if moved:
+        print(f"  {len(moved)} moved by Jev (it picked them before '{new}' existed):")
+        print("\n".join(moved))
+    if to_confirm:
+        print(
+            f"  {len(to_confirm)} you set by hand that Jev thinks belong in"
+            f" '{new}'; confirm below"
+        )
+    if kept:
+        print(f"  {kept} keep their category")
     if to_confirm or suggested or left:
         print()
         review_merchants(conn, categories, to_confirm + suggested + left)
@@ -335,14 +321,6 @@ def main() -> None:
         "--all",
         action="store_true",
         help="Review every non-manual merchant, not just uncategorized",
-    )
-    s.add_argument(
-        "--resort",
-        nargs="?",
-        const="",
-        metavar="CATEGORY",
-        help="Ask Jev again with the current categories: places what it can of 'Other'"
-        " automatically, and proposes moves into CATEGORY (e.g. one you just added)",
     )
     s.set_defaults(func=cmd_review)
 
