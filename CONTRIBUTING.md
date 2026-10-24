@@ -28,73 +28,53 @@ They run offline in a few seconds and never touch your data: each test gets its 
 
 ## Project structure
 
-Generated with the `tree` alias from `~/.bashrc` (`exa -T --icons`), limited to 3 levels:
+Paths marked "git-ignored" belong to each user and are never committed.
 
 ```
- .
-├──  categories.example.toml
-├──  categories.toml
-├──  data
-├──  documents
-│   ├──  checking-ideas.md
-│   ├──  jev-review.md
-│   └──  plaid-ideas.md
-├──  pyproject.toml
-├── 󰂺 README.md
-├── 󰣞 src
-│   └──  spending
-│       ├──  __init__.py
-│       ├──  bank_sync.py
-│       ├──  classify.py
-│       ├──  cli.py
-│       ├──  dashboard.py
-│       ├──  db.py
-│       ├──  jev_eval.py
-│       ├──  jev_tab.py
-│       ├──  parser.py
-│       ├──  pipeline.py
-│       └──  plaid_source.py
-├──  statements
-│   └──  l50csvdl.csv
-├──  CONTRIBUTING.md
-├──  tests
-│   ├──  conftest.py
-│   ├──  fakes.py
-│   ├──  test_data_safety.py
-│   ├──  test_plaid_link.py
-│   ├──  test_plaid_sync.py
-│   └──  test_storage.py
-└──  uv.lock
+.
+├── .claude/settings.json       Claude Code permissions (see CLAUDE.md)
+├── .env                        keys and settings, copied from .env.example (git-ignored)
+├── .env.example                template for .env, with every setting explained
+├── .pre-commit-config.yaml     commit hooks: Ruff, ty, whitespace, bank-data and API-key guards
+├── CLAUDE.md                   rules for Claude: commits, pull requests, issues
+├── CONTRIBUTING.md             this file
+├── README.md                   usage
+├── categories.toml             the user's categories and descriptions (git-ignored)
+├── categories.example.toml     template for categories.toml; change the default categories here
+├── data/                       the database, and the Plaid token without an OS keyring (git-ignored)
+├── documents/                  feature proposals (see Proposals below)
+├── pyproject.toml, uv.lock     dependencies, the `spend` entry point, dev tools and their settings
+├── src/spending/
+│   ├── .streamlit/config.toml  dashboard server settings
+│   ├── cli.py                  entry point: `spend …`
+│   ├── parser.py               CSV → Transaction
+│   ├── classify.py             categories, the payment check, redaction, Jev
+│   ├── pipeline.py             categorize → store, shared by CSV import and bank sync
+│   ├── db.py                   SQLite schema, migrations, queries
+│   ├── plaid_source.py         Plaid client, /transactions/sync, token storage
+│   ├── bank_sync.py            the dashboard's sync on open and sign-in card
+│   ├── dashboard.py            Streamlit app and its Spending tab
+│   ├── jev_tab.py              the Categorization tab
+│   └── jev_eval.py             `python -m spending.jev_eval`: Jev vs the example keyword rules
+├── statements/                 the user's CSV exports (git-ignored)
+└── tests/                      offline tests; fakes.py is a fake Plaid
 ```
 
+- **`data/`**: `spending.db` (SQLite) is created on first import, with the tables `transactions`, `merchant_memory`, `jev_answers`, `jev_evals` and `plaid_items`, each commented in `db.py`. `plaid-tokens.json` holds the Plaid access token, only where there's no OS keyring (e.g. WSL). The folder and its files are created owner-only (700 / 600).
+- **`src/spending/.streamlit/config.toml`** applies however the dashboard is started: it listens only on `127.0.0.1`, accepts only the hostnames `localhost` and `127.0.0.1` (blocks DNS rebinding), and sends no usage statistics.
+- **`categories.toml`** is copied from the example at setup, and `+` in `spend review` adds to it. Its `[rules]` are only labels for `jev_eval`; imports don't use them. Each git worktree needs its own copy, or set `SPENDING_CATEGORIES` in `.env` to share one.
 
-## Who touches what
+## Proposals
 
-| Path | User | Developer | Status | Notes |
-|---|:-:|:-:|---|---|
-| `statements/` | ✅ | | **In use** | Drop MSUFCU CSV exports here. Holds `l50csvdl.csv` (Jan–Oct 2026). Git-ignored. |
-| `uv run spend …` (CLI) | ✅ | | **In use** | `import`, `review`, `set`, `summary`, `dashboard`, `unlink` |
-| Dashboard (browser) | ✅ | | **In use** | Streamlit app launched by `spend dashboard`. With Plaid set up, it pulls new transactions each time it opens, or asks you to sign in to your bank |
-| `categories.toml` | ✅ | | **In use** | Each user's own category list and the descriptions Jev reads, plus example keyword rules used only by `jev_eval`. Copied from the example at setup; users add categories with `+` in `spend review`. Git-ignored. |
-| `categories.example.toml` | | ✅ | Config | The committed template for `categories.toml`. Devs change the default categories here. |
-| `data/` | | | Generated | `spending.db` (SQLite) is created on first import: `transactions`, `merchant_memory`, `jev_answers` (Jev's last answer per merchant with its confidence and latency, used for review suggestions and the Categorization tab) and `jev_evals` (results of `python -m spending.jev_eval`), plus `plaid_items` (each bank login's sync cursor and cutover date). `plaid-tokens.json` holds the Plaid access token, owner-only, only where there's no OS keyring (e.g. WSL). The folder and database are created owner-only (700 / 600). Git-ignored. |
-| `src/spending/` | | ✅ | **Active development** | All app code (~2,400 lines) |
-| `src/spending/.streamlit/config.toml` | | ✅ | Config | Dashboard server settings, applied however it's started: only `127.0.0.1`, only the hostnames `localhost` / `127.0.0.1` (blocks DNS rebinding), no usage statistics |
-| `tests/` | | ✅ | Tests | `uv run pytest`, before and after big changes: data safety (file permissions, token storage, what reaches Jev and Plaid, git-ignore and commit-hook guards, dashboard binding), storage integrity, and bank sync and sign-in against a fake Plaid (`fakes.py`). Offline, made-up data, a throwaway database per test |
-| `pyproject.toml` / `uv.lock` | | ✅ | Config | Dependencies and the `spend` entry point, plus dev tools (Ruff, ty, pre-commit, pytest) and their settings |
-| `.pre-commit-config.yaml` | | ✅ | Config | Git pre-commit hooks: Ruff, ty, whitespace, bank-data and API-key guards |
-| `.env` | | ✅ | Secret | `OPENROUTER_KEY`; optionally `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` for bank sync. Git-ignored. |
-| `README.md` | ✅ | ✅ | Docs | Usage and how categorization works |
-| `CONTRIBUTING.md` | | ✅ | Docs | This file |
-| `documents/` | | ✅ | **Planning** | Feature proposals, separate from the MVP (see [Planned features](#planned-features)) |
-| `documents/plaid-ideas.md` | | ✅ | In progress | Pull transactions via Plaid instead of downloading CSVs. MVP built and connected to MSUFCU: the dashboard syncs when it opens and signs in through Plaid Link; `spend unlink` disconnects. Not yet: Plaid's categories, `spend sync`, a schedule. |
-| `documents/jev-review.md` | | ✅ | Docs | What Jev is, how `classify.py` uses it, agreement eval results, and speed/cost vs a chat LLM (with how it was estimated) |
-| `documents/checking-ideas.md` | | ✅ | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
-| `documents/extend-review.md` | | ✅ | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
-| `documents/resort-issues.md` | | ✅ | Resolved | Analysis of two re-sort problems found on real data: summary counts that didn't add up, and 98%-confident moves that still asked for approval |
-| `documents/limit-flags.md` | | ✅ | Proposal | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm` |
-| `documents/per-user-categories.md` | | ✅ | Implemented | `categories.toml` is each user's git-ignored copy of `categories.example.toml`, made at setup; how to upgrade an existing checkout |
-| `.venv/` | | | Generated | Created by `uv sync` |
+| Path | Status | Notes |
+|---|---|---|
+| `documents/plaid-ideas.md` | In progress | Pull transactions via Plaid instead of downloading CSVs. MVP built and connected to MSUFCU: the dashboard syncs when it opens and signs in through Plaid Link; `spend unlink` disconnects. Not yet: Plaid's categories, `spend sync`, a schedule. |
+| `documents/jev-review.md` | Docs | What Jev is, how `classify.py` uses it, agreement eval results, and speed/cost vs a chat LLM (with how it was estimated) |
+| `documents/checking-ideas.md` | Proposal | Import the checking account too (rent, investing, P2P), with card-payment reconciliation to avoid double counting |
+| `documents/extend-review.md` | Implemented | Jev's guesses in `spend review`, `+` to add a category, and `--resort` |
+| `documents/resort-issues.md` | Resolved | Analysis of two re-sort problems found on real data: summary counts that didn't add up, and 98%-confident moves that still asked for approval |
+| `documents/limit-flags.md` | Proposal | Fewer CLI flags: replace `review --resort` with change detection; maybe merge `--dry-run` and `--no-llm` |
+| `documents/per-user-categories.md` | Implemented | `categories.toml` is each user's git-ignored copy of `categories.example.toml`, made at setup; how to upgrade an existing checkout |
 
 ## Layers
 
@@ -103,7 +83,7 @@ flowchart TB
     subgraph USER["👤 User layer"]
         direction LR
         U1["statements/<br/>CSV exports"]
-        U2["spend CLI<br/>import · review · set · summary"]
+        U2["spend CLI<br/>import · review · set · summary · unlink"]
         U3["Dashboard<br/>(browser)"]
     end
 
@@ -164,6 +144,7 @@ flowchart LR
     cli --> pipeline
     cli --> classify
     cli --> db
+    cli -. "spend unlink" .-> plaidsrc
     cli -. "spend dashboard" .-> dash
     pipeline --> classify
     pipeline --> db
@@ -174,8 +155,10 @@ flowchart LR
     dash --> db
     dash --> jevtab
     banksync --> plaidsrc
+    banksync --> db
     plaidsrc --> parser
     plaidsrc --> pipeline
+    plaidsrc --> db
     plaidsrc --> plaid
     jevtab --> db
     jeval --> classify
