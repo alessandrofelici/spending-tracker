@@ -3,9 +3,10 @@ never more than the purchase cost, each checking transfer pays back at most one
 purchase, and checking rows never show up as spending or in review."""
 
 import pytest
+from fakes import ACCESS_TOKEN, CARD, CHECKING, txn
 from test_storage import row
 
-from spending import db
+from spending import db, plaid_source
 
 
 def checking(tid: str, amount: float, day: str = "2026-03-20") -> dict:
@@ -121,3 +122,62 @@ def test_logins_by_role_and_their_cutovers(concert):
         "checking-login",
         "card-login",
     ]
+
+
+# --- The checking login (Plaid is faked: tests/fakes.py) ----------------------
+
+
+def on_checking(
+    tid: str, day: str, description: str, amount: float, pending: bool = False
+) -> dict:
+    return txn(
+        tid, day, description, amount, CHECKING["account_id"], pending, wrap=False
+    )
+
+
+def test_a_checking_login_keeps_the_card_login(conn, fake_plaid):
+    plaid = fake_plaid.client()
+    plaid_source.link(conn, plaid, "public-card", "Card bank")
+    _, problems = plaid_source.link(
+        conn, plaid, "public-checking", "Checking bank", "reimbursements"
+    )
+    assert problems == [] and fake_plaid.removed == []
+    roles = {i["item_id"]: i["role"] for i in db.get_plaid_items(conn)}
+    assert roles == {"item-1": "card", "item-2": "reimbursements"}
+
+    # Signing in to checking again replaces only the older checking login.
+    plaid_source.link(conn, plaid, "public-again", "Checking bank", "reimbursements")
+    roles = {i["item_id"]: i["role"] for i in db.get_plaid_items(conn)}
+    assert roles == {"item-1": "card", "item-3": "reimbursements"}
+    assert fake_plaid.removed == ["access-sandbox-login-2"]
+
+
+def test_checking_sync_stores_only_money_in_and_never_asks_jev(
+    conn, fake_plaid, monkeypatch
+):
+    def no_jev(*_args, **_kwargs):
+        raise AssertionError("checking rows must never be categorized")
+
+    monkeypatch.setattr(plaid_source, "categorize_rows", no_jev)
+    db.add_plaid_item(conn, "item-chk", "Checking bank", "reimbursements")
+    fake_plaid.page(
+        added=[
+            on_checking("in", "2026-03-20", "ZELLE FROM FRIEND", -80.0),
+            on_checking("rent", "2026-03-01", "RENT PAYMENT", 900.0),
+            on_checking("pend", "2026-03-21", "VENMO CASHOUT", -40.0, pending=True),
+            txn("card", "2026-03-14", "TICKETS 1234 LANSING MI", 240.0),
+        ]
+    )
+    result = plaid_source.sync(conn, fake_plaid.client(), "item-chk", ACCESS_TOKEN)
+
+    assert (result.added, result.flagged) == (1, 0)
+    assert result.skipped_accounts == [CARD["name"]]
+    [r] = conn.execute("SELECT * FROM transactions").fetchall()
+    assert (r["id"], r["account"], r["amount"], r["category"], r["source"]) == (
+        "in",
+        "checking",
+        -80.0,
+        "Incoming",
+        "checking",
+    )
+    assert list(conn.execute(db.SPENDING_SQL)) == []  # not spending
