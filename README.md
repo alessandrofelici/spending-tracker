@@ -48,6 +48,15 @@ In `review`, type a category's number, Enter to accept Jev's `[suggestion]`, `+`
 
 If `spend set` matches several stores, it lists them: use the exact name, or add `--all-matches` to set them all.
 
+### Purchases you were paid back for
+
+When you pay for something big and friends pay you back (a $240 concert order for three, each sending you $80), only your share is spending. The **Paid back** section of the dashboard takes the rest off: totals, charts and top stores then count what the purchase cost *you*, and the transactions table shows the full price next to it.
+
+- **Automatically, from checking.** Once your card is connected, open **Connect checking to spot purchases you were paid back for** and sign in to the bank where the money arrives (Plaid only offers checking accounts here). Each time the dashboard opens, money coming in to checking is matched to a card purchase of at least $50 made up to 30 days before it, for no more than is left to pay back of it, so several friends' shares add up. Nothing counts until you click **Paid back**. **Not this purchase** proposes the next best one, and **Not a payback** (a paycheck, say) hides that transfer for good.
+- **By hand.** Under **Mark a purchase as paid back**, pick a purchase from the month you're viewing and enter the amount, with an optional note. Use this for cash or money that arrived somewhere else.
+
+Each paid-back piece is listed under **Paid back so far**, with **Undo**. The $50 and 30 days can be changed with `REIMBURSE_MIN_PURCHASE` and `REIMBURSE_WINDOW_DAYS` in `.env`. Checking is only used for this: it never counts as spending.
+
 ### Without bank sync
 
 Download your transactions from MSUFCU Online Banking (Download Transactions, as CSV), then:
@@ -68,12 +77,12 @@ To disconnect:
 uv run spend unlink
 ```
 
-It revokes the app's access at Plaid and deletes the access token; your transactions stay. Check your bank's connected-apps settings too, since some banks still list the app.
+It revokes the app's access at Plaid and deletes the access token; your transactions stay. It disconnects every bank, including the checking connected for paid-back purchases. Check your bank's connected-apps settings too, since some banks still list the app.
 
 ## Privacy
 
 - Only a store's description goes to Jev, and only the first time it's seen, with account, reference and phone numbers masked (`SQ *SHOP #### GRAND RAPIDS MI`). Amounts, dates, balances and card payments never leave your computer. Jev is used through zero-data-retention endpoints.
-- Your bank password goes only to your bank's own page. Plaid reads only the accounts you share, and only credit accounts are stored.
+- Your bank password goes only to your bank's own page. Plaid reads only the accounts you share. From the card's bank only credit accounts are stored; from the checking you connect for paid-back purchases, only money coming in. Checking transactions name the people who paid you, so they're never sent to Jev or anywhere else.
 - Plaid's access token is kept in your OS keyring, or where there is none (as in WSL) in `data/plaid-tokens.json`, readable only by you.
 - `data/` and the database are readable only by you. For a setup from before that, run `chmod 700 data && chmod 600 data/*`.
 - The dashboard only accepts connections from this computer, and sends no usage statistics.
@@ -87,6 +96,8 @@ It revokes the app's access at Plaid and deletes the access token; your transact
 | `Couldn't start the sign-in` | Wrong keys, or `PLAID_ENV` doesn't match the secret. |
 | `Plaid is still getting your transactions` | A new connection's first sync isn't ready yet. Open the dashboard again in a few minutes. |
 | Your bank `needs you to sign in again` | Click **Sign in again**. |
+| No **Connect checking** panel | It appears once your card is connected. |
+| A transfer is proposed for the wrong purchase | Click **Not this purchase**; if it isn't a payback at all, **Not a payback**. |
 | Many transactions left as `Other` | Check `OPENROUTER_KEY` in `.env`, make the `[descriptions]` in `categories.toml` clearer, or add a category with `+` in `spend review`. |
 
 ## Development
