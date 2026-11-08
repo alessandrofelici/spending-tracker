@@ -1,6 +1,10 @@
 """Dashboard bank sync: get new transactions from Plaid each time the app opens,
 or ask you to sign in to your bank first. plaid_source.py does the Plaid side.
 
+There are two logins, each synced on its own: the card ("card", what the
+dashboard charts) and, optionally, a checking account ("reimbursements"), whose
+money coming in shows which purchases friends paid you back for (paid_back.py).
+
 Signing in happens in Plaid Link, Plaid's own sign-in window: it loads from Plaid
 and opens the bank's page in a pop-up, so your bank password never reaches this
 app. Link hands back a one-time public token, which is swapped for the access
@@ -47,6 +51,12 @@ export default function ({ data, setTriggerValue }) {
 """
 # How long to wait for a new login's first transactions before showing the page.
 FIRST_SYNC_WAIT_S = 30
+ROLES = ("card", "reimbursements")
+
+
+def _key(role: str) -> str:
+    """Where a login's sync state lives in st.session_state."""
+    return "bank" if role == "card" else f"bank_{role}"
 
 
 def render() -> str:
@@ -67,18 +77,29 @@ def render() -> str:
         )
         return "error"
 
+    logins = {}
     with db.connect() as conn:
-        items = db.get_plaid_items(conn)  # newest first
-        item = items[0] if items else None
-        token = plaid_source.load_token(item["item_id"]) if item else None
-        if "bank" not in st.session_state:  # the app just opened
-            _revoke_leftovers(conn, plaid, items[1:])
-            st.session_state.bank = _sync(
-                conn, plaid, item, token, st.session_state.pop("just_linked", False)
-            )
+        for role in ROLES:
+            items = db.get_plaid_items(conn, role)  # newest first
+            item = items[0] if items else None
+            token = plaid_source.load_token(item["item_id"]) if item else None
+            logins[role] = (item, token)
+            if _key(role) not in st.session_state:  # the app just opened
+                _revoke_leftovers(conn, plaid, items[1:])
+                st.session_state[_key(role)] = _sync(
+                    conn,
+                    plaid,
+                    item,
+                    token,
+                    st.session_state.pop(f"just_linked_{role}", False),
+                )
         _finish_sign_in(conn, plaid)
     bank = st.session_state.bank
-    _show(plaid, item, token, bank)
+    _show(plaid, *logins["card"], bank)
+    if bank["state"] != "sign_in":  # the card comes first
+        _show_checking(
+            plaid, *logins["reimbursements"], st.session_state[_key(ROLES[1])]
+        )
     return bank["state"]
 
 
@@ -147,7 +168,7 @@ def _show(
         )
     elif bank["state"] == "sign_in_again":
         st.warning(f"{name} needs you to sign in again. {bank['message']}")
-        _sign_in_button(plaid, "Sign in again", token)
+        _sign_in_button(plaid, "Sign in again", "card", token)
     else:
         with st.container(border=True):
             st.markdown("#### Connect your bank")
@@ -158,12 +179,45 @@ def _show(
             )
             if bank.get("message"):
                 st.warning(bank["message"])
-            _sign_in_button(plaid, "Sign in to your bank")
+            _sign_in_button(plaid, "Sign in to your bank", "card")
             if plaid.env == "sandbox":
                 st.caption(
                     "Plaid sandbox (test banks only): sign in with"
                     " user_good / pass_good, and 1234 if asked for a code."
                 )
+
+
+def _show_checking(
+    plaid: Plaid, item: sqlite3.Row | None, token: str | None, bank: dict
+) -> None:
+    """The checking login, kept small: it's optional."""
+    name = item["institution"] if item and item["institution"] else "your checking"
+    if bank["state"] == "synced":
+        r = bank["result"]
+        if r.status == "NOT_READY":
+            st.caption(f"Plaid is still getting {name}'s transactions.")
+        else:
+            st.caption(
+                f"Checking ({name}): {r.added} new transfer(s) in, to spot"
+                " purchases you were paid back for."
+            )
+    elif bank["state"] == "error":
+        st.warning(f"Couldn't get transfers from {name}: {bank['message']}")
+    elif bank["state"] == "sign_in_again":
+        st.warning(f"{name} needs you to sign in again. {bank['message']}")
+        _sign_in_button(plaid, "Sign in to checking again", "reimbursements", token)
+    else:
+        with st.expander("Connect checking to spot purchases you were paid back for"):
+            st.write(
+                "When friends pay you back by Zelle, Venmo or a deposit, the"
+                " dashboard can match the money to the purchase, so only your"
+                " share counts. Only money coming in is kept, it's never counted"
+                " as spending and never leaves this computer. When your bank asks"
+                " which accounts to share, pick only checking."
+            )
+            if bank.get("message"):
+                st.warning(bank["message"])
+            _sign_in_button(plaid, "Connect checking", "reimbursements")
 
 
 def _summary(name: str, r: plaid_source.SyncResult) -> str:
@@ -188,11 +242,16 @@ def _summary(name: str, r: plaid_source.SyncResult) -> str:
     return text
 
 
-def _sign_in_button(plaid: Plaid, label: str, token: str | None = None) -> None:
-    """Opens Plaid Link; with token, in update mode for the existing login."""
-    if st.button(label, type="primary"):
+def _sign_in_button(
+    plaid: Plaid, label: str, role: str, token: str | None = None
+) -> None:
+    """Opens Plaid Link for a login of this role; with token, in update mode for
+    the existing login."""
+    if st.button(label, key=f"sign-in-{role}", type="primary"):
         try:
-            link_token = plaid.link_token(access_token=token)
+            link_token = plaid.link_token(
+                access_token=token, checking_only=role == "reimbursements"
+            )
         except (PlaidError, httpx.HTTPError) as e:
             st.error(f"Couldn't start the sign-in: {e}")
             return
@@ -200,6 +259,7 @@ def _sign_in_button(plaid: Plaid, label: str, token: str | None = None) -> None:
             "token": link_token,
             "attempt": uuid.uuid4().hex,
             "update": token is not None,
+            "role": role,
         }
         st.rerun()
 
@@ -218,6 +278,7 @@ def _finish_sign_in(conn: sqlite3.Connection, plaid: Plaid) -> None:
         on_success_change=lambda: None,
         on_exit_change=lambda: None,
     )
+    role = link.get("role", "card")
     if result.success:
         del st.session_state.link_attempt
         # Update mode keeps the same login and token, so there's nothing to swap.
@@ -228,9 +289,10 @@ def _finish_sign_in(conn: sqlite3.Connection, plaid: Plaid) -> None:
                     plaid,
                     result.success["public_token"],
                     result.success["institution"],
+                    role,
                 )
             except (PlaidError, httpx.HTTPError) as e:
-                st.session_state.bank = {
+                st.session_state[_key(role)] = {
                     "state": "sign_in",
                     "message": f"Signing in didn't finish: {e}",
                 }
@@ -242,11 +304,11 @@ def _finish_sign_in(conn: sqlite3.Connection, plaid: Plaid) -> None:
                     *problems,
                 ]
             )
-        st.session_state.just_linked = True
-        del st.session_state.bank  # sync again on the next run
+        st.session_state[f"just_linked_{role}"] = True
+        del st.session_state[_key(role)]  # sync again on the next run
         st.rerun()
     elif result.exit is not None:
         del st.session_state.link_attempt
         if result.exit:  # empty when you just closed the window
-            st.session_state.bank["message"] = result.exit
+            st.session_state[_key(role)]["message"] = result.exit
         st.rerun()

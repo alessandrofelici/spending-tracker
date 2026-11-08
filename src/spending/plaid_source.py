@@ -139,9 +139,13 @@ class Plaid:
             )
         return data
 
-    def link_token(self, access_token: str | None = None) -> str:
+    def link_token(
+        self, access_token: str | None = None, checking_only: bool = False
+    ) -> str:
         """A token that opens Plaid Link: to add a bank login, or with
-        access_token, to sign in to an existing one again (update mode)."""
+        access_token, to sign in to an existing one again (update mode).
+        checking_only offers only checking accounts to share (the login that
+        spots paid-back purchases)."""
         body: dict = {
             "client_name": "Spending Tracker",
             "language": "en",
@@ -154,6 +158,10 @@ class Plaid:
         else:
             body["products"] = ["transactions"]
             body["transactions"] = {"days_requested": DAYS_REQUESTED}
+            if checking_only:
+                body["account_filters"] = {
+                    "depository": {"account_subtypes": ["checking"]}
+                }
         return self._post("/link/token/create", body)["link_token"]
 
     def exchange(self, public_token: str) -> tuple[str, str]:

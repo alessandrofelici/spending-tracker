@@ -4,11 +4,13 @@ and money coming in to checking is never spending. Runs the real app offline
 
 import pytest
 import streamlit as st
+from fakes import CHECKING, txn
 from streamlit.testing.v1 import AppTest
 from test_reimbursements import checking
 from test_storage import row
 
-from spending import db
+from spending import db, plaid_source
+from spending.plaid_source import Plaid
 
 APP = str(db.ROOT / "src" / "spending" / "dashboard.py")
 
@@ -18,6 +20,8 @@ def app(monkeypatch, db_path):
     """The dashboard reading db_path. Plaid keys are blank (conftest), so bank
     sync is off and nothing reaches the network."""
     monkeypatch.setattr(db, "DB_PATH", db_path)
+    # connect()'s default path was bound when db.py loaded; bank sync relies on it.
+    monkeypatch.setattr(db.connect, "__defaults__", (db_path,))
 
     def run() -> AppTest:
         st.cache_data.clear()  # the app caches its query across runs in one process
@@ -127,3 +131,68 @@ def test_marking_more_than_the_price_is_refused(concert, app):
     at.run()
     assert any("left to pay back" in e.value for e in at.error)
     assert db.get_reimbursements(concert) == []
+
+
+# --- Bank sync with a card login and a checking login (Plaid is faked) --------
+
+
+@pytest.fixture
+def banks(monkeypatch, conn, fake_plaid):
+    """Bank sync on, talking to the fake Plaid."""
+    monkeypatch.setattr(
+        Plaid, "from_env", classmethod(lambda _cls: fake_plaid.client())
+    )
+    return fake_plaid
+
+
+def login(conn, item_id: str, role: str) -> None:
+    db.add_plaid_item(conn, item_id, f"{role} bank", role)
+    plaid_source.save_token(item_id, f"access-{item_id}")
+    conn.commit()
+
+
+def test_both_logins_sync_when_the_app_opens(conn, banks, app):
+    login(conn, "item-card", "card")
+    login(conn, "item-chk", "reimbursements")
+    banks.page(added=[txn("t1", "2026-03-10", "TICKETS 1234 LANSING MI", 240.0)])
+    banks.page(
+        added=[
+            txn(
+                "in1",
+                "2026-03-12",
+                "ZELLE FROM FRIEND",
+                -80.0,
+                CHECKING["account_id"],
+                wrap=False,
+            )
+        ]
+    )
+    at = app()
+    assert [b["access_token"] for b in banks.bodies("/transactions/sync")] == [
+        "access-item-card",
+        "access-item-chk",
+    ]
+    accounts = dict(conn.execute("SELECT id, account FROM transactions").fetchall())
+    assert accounts == {"t1": "credit", "in1": "checking"}
+    assert any("1 new transfer(s) in" in c.value for c in at.caption)
+    assert metric(at, "Total spent") == "$240.00"
+    assert "ok-in1" in [b.key for b in at.button]  # proposed against the tickets
+
+
+def test_connecting_checking_offers_only_checking_accounts(conn, banks, app):
+    login(conn, "item-card", "card")
+    banks.page()
+    db.insert_transactions(conn, [row("t1", "TICKETS 1234 LANSING MI", 240.0)])
+    conn.commit()
+    at = app()
+    assert "sign-in-card" not in [b.key for b in at.button]
+    button(at, "sign-in-reimbursements").click().run()
+    [body] = banks.bodies("/link/token/create")
+    assert body["account_filters"] == {"depository": {"account_subtypes": ["checking"]}}
+    assert at.session_state.link_attempt["role"] == "reimbursements"
+
+
+def test_checking_waits_until_the_card_is_connected(conn, banks, app):
+    at = app()
+    keys = [b.key for b in at.button]
+    assert "sign-in-card" in keys and "sign-in-reimbursements" not in keys
