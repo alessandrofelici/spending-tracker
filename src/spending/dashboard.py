@@ -6,6 +6,7 @@ import streamlit as st
 
 from spending.bank_sync import render as render_bank_sync
 from spending.db import DB_PATH, SPENDING_SQL, connect
+from spending.paid_back import render as render_paid_back
 
 # Validated colorblind-safe categorical order (fixed, never cycled).
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -144,6 +145,8 @@ st.dataframe(
     column_config={"spent": st.column_config.NumberColumn(format="$%.2f")},
     width="stretch",
 )
+
+render_paid_back(month, cur)
 
 st.subheader("Transactions")
 picked = st.multiselect("Categories", sorted(cur.category.unique()))
