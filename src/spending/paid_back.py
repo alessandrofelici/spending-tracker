@@ -84,6 +84,7 @@ def _mark_by_hand(month: str, purchases: pd.DataFrame) -> None:
             "Purchase",
             open_.id.tolist(),
             format_func=lambda i: _label(open_.set_index("id").loc[i]),
+            key="paid_back_purchase",
         )
         amount = st.number_input(
             "Paid back ($)", min_value=0.0, step=1.0, format="%.2f"

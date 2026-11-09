@@ -34,6 +34,8 @@ Pick your bank and sign in on its own page. When asked which accounts to share, 
 
 `uv run spend dashboard` is the whole routine. Each time it opens, it gets new transactions from your bank, categorizes them, and shows the month's total against the month before, spending by category and month by month, your top merchants, and every transaction. It runs at `http://127.0.0.1:8501`; stop it with Ctrl+C.
 
+The **Period** picker in the sidebar switches from one month (the default) to the last 3, 6 or 12 months, a whole year, all time, or a custom range of months. Everything on the page follows it. For more than one month you also see the average per month, the highest and lowest month, the average purchase and a table of categories with their share and monthly average. The month that isn't over yet counts in the total but not in those averages.
+
 ### Fixing categories
 
 When the dashboard says some transactions need categorizing, or one looks wrong:
