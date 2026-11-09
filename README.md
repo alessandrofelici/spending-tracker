@@ -50,12 +50,12 @@ If `spend set` matches several stores, it lists them: use the exact name, or add
 
 ### Purchases you were paid back for
 
-When you pay for something big and friends pay you back (a $240 concert order for three, each sending you $80), only your share is spending. The **Paid back** section of the dashboard takes the rest off: totals, charts and top stores then count what the purchase cost *you*, and the transactions table shows the full price next to it.
+When friends pay you back for their share (half the gas, their part of a restaurant bill, or the whole price of a ticket you bought for them), only your share is spending. The **Paid back** section of the dashboard takes the rest off: totals, charts and top stores then count what the purchase cost *you*, and the transactions table shows the full price next to it.
 
-- **Automatically, from checking.** Once your card is connected, open **Connect checking to spot purchases you were paid back for** and sign in to the bank where the money arrives (Plaid only offers checking accounts here). Each time the dashboard opens, money coming in to checking is matched to a card purchase of at least $50 made up to 30 days before it, for no more than is left to pay back of it, so several friends' shares add up. Nothing counts until you click **Paid back**. **Not this purchase** proposes the next best one, and **Not a payback** (a paycheck, say) hides that transfer for good.
-- **By hand.** Under **Mark a purchase as paid back**, pick a purchase from the month you're viewing and enter the amount, with an optional note. Use this for cash or money that arrived somewhere else.
+- **Automatically, from checking.** Once your card is connected, open **Connect checking to spot purchases you were paid back for** and sign in to the bank where the money arrives (Plaid only offers checking accounts here). Each time the dashboard opens, every Zelle payment into checking is matched to a card purchase made within 7 days of it (before or after), for no more than is left to pay back of it, so several friends' shares add up. An exact share of a purchase (all of it, half, a third, ...) wins; otherwise the purchase closest in date does. Other money coming in (paychecks, Venmo, deposits) is never proposed. Nothing counts until you click **Paid back**. **Not this purchase** proposes the next best one, and **Not a payback** (a friend repaying a loan, say) hides that payment for good.
+- **By hand.** Under **Mark a purchase as paid back**, pick a purchase from the month you're viewing and enter the amount, with an optional note. Use this for cash, Venmo, or a payback that came more than a week later.
 
-Each paid-back piece is listed under **Paid back so far**, with **Undo**. The $50 and 30 days can be changed with `REIMBURSE_MIN_PURCHASE` and `REIMBURSE_WINDOW_DAYS` in `.env`. Checking is only used for this: it never counts as spending.
+Each paid-back piece is listed under **Paid back so far**, with **Undo**. The 7 days can be changed with `REIMBURSE_WINDOW_DAYS` in `.env`, and `REIMBURSE_MIN_PURCHASE` skips purchases below an amount. Checking is only used for this: it never counts as spending.
 
 ### Without bank sync
 

@@ -209,7 +209,7 @@ def _show_checking(
     else:
         with st.expander("Connect checking to spot purchases you were paid back for"):
             st.write(
-                "When friends pay you back by Zelle, Venmo or a deposit, the"
+                "When friends pay you back by Zelle, the"
                 " dashboard can match the money to the purchase, so only your"
                 " share counts. Only money coming in is kept, it's never counted"
                 " as spending and never leaves this computer. When your bank asks"

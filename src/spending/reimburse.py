@@ -1,19 +1,23 @@
 """Spot purchases friends paid you back for (issue #19).
 
-Money coming in to checking (the second bank login, see plaid_source.py) is
-matched to a recent card purchase: a transfer that arrives within
-REIMBURSE_WINDOW_DAYS after a purchase of at least REIMBURSE_MIN_PURCHASE, for no
-more than what's still left to pay back of it. Several transfers can pay back one
-purchase, e.g. three friends sending their share of a concert order.
+Only Zelle payments into checking (the second bank login, see plaid_source.py)
+are considered; paychecks, deposits and other transfers never are. A Zelle
+payment is matched to a card purchase made within REIMBURSE_WINDOW_DAYS of it,
+before or after (card purchases can post a day or two late), for no more than
+what's still left to pay back of it. Typical cases: a friend's half of the gas,
+their share of a restaurant bill, or the whole price of a ticket you bought for
+them. Several payments can pay back one purchase, e.g. three friends each
+sending their share of the bill.
 
 Matches are only proposed: nothing counts until you confirm it in the dashboard
 (db.add_reimbursement). Saying a match is wrong hides it for good
-(db.dismiss_match), and saying a transfer isn't a paid-back share at all, like a
-paycheck, hides it from every purchase. Everything stays on this machine: these
-descriptions name private individuals.
+(db.dismiss_match), and saying a payment isn't a paid-back share at all, like a
+friend repaying a loan, hides it from every purchase. Everything stays on this
+machine: these descriptions name private individuals.
 """
 
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -21,10 +25,12 @@ from functools import partial
 
 from . import db
 
-DEFAULT_WINDOW_DAYS = 30
-DEFAULT_MIN_PURCHASE = 50.0
+DEFAULT_WINDOW_DAYS = 7  # "within a few days", either way
+DEFAULT_MIN_PURCHASE = 0.0  # a split tank of gas can be small
+# What makes money coming in a candidate: only Zelle payments.
+ZELLE_RE = re.compile(r"zelle", re.IGNORECASE)
 # Even shares of a purchase (all of it, half, a third, ...), preferred over other
-# amounts when a transfer could pay back several purchases.
+# amounts (an uneven share of a bill) when a payment could fit several purchases.
 SPLITS = range(1, 7)
 CENTS = 0.01  # amounts within a cent are the same amount
 NOT_A_REIMBURSEMENT = (
@@ -67,8 +73,8 @@ def propose(
     window: int | None = None,
     minimum: float | None = None,
 ) -> list[Match]:
-    """At most one proposed purchase per unused transfer, oldest transfer first.
-    Transfers are taken in date order, and each one only counts against what the
+    """At most one proposed purchase per unused Zelle payment, oldest first.
+    Payments are taken in date order, and each one only counts against what the
     earlier proposals left of a purchase, so accepting every proposal never pays
     back more than a purchase cost."""
     window = window_days() if window is None else window
@@ -90,6 +96,7 @@ def propose(
            ORDER BY date, id""",
         (NOT_A_REIMBURSEMENT,),
     ).fetchall()
+    incoming = [i for i in incoming if is_zelle(i["description"])]
     dismissed = {
         (r["txn_id"], r["incoming_id"])
         for r in conn.execute("SELECT txn_id, incoming_id FROM dismissed_matches")
@@ -99,18 +106,19 @@ def propose(
     for i in incoming:
         arrived = date.fromisoformat(i["date"])
         earliest = (arrived - timedelta(days=window)).isoformat()
+        latest = (arrived + timedelta(days=window)).isoformat()
         amount = round(i["amount"], 2)
         fits = [
             p
             for p in purchases
-            if earliest <= p["date"] <= i["date"]
+            if earliest <= p["date"] <= latest
             and amount <= left[p["id"]] + CENTS / 2
             and (p["id"], i["id"]) not in dismissed
         ]
         if not fits:
             continue
 
-        best = min(fits, key=partial(_rank, amount))
+        best = min(fits, key=partial(_rank, amount, arrived))
         out.append(
             Match(
                 purchase_id=best["id"],
@@ -129,15 +137,16 @@ def propose(
     return out
 
 
-def _rank(amount: float, purchase: sqlite3.Row) -> tuple:
+def is_zelle(description: str) -> bool:
+    return bool(ZELLE_RE.search(description))
+
+
+def _rank(amount: float, arrived: date, purchase: sqlite3.Row) -> tuple:
     """Best first: an even share of the purchase (all of it before half, ...),
-    then the most recent purchase."""
+    then the purchase closest in date to the payment, then the earlier one."""
     share = share_of(amount, purchase["amount"])
-    return (
-        share is None,
-        share or 0,
-        -date.fromisoformat(purchase["date"]).toordinal(),
-    )
+    apart = abs((date.fromisoformat(purchase["date"]) - arrived).days)
+    return (share is None, share or 0, apart, purchase["date"])
 
 
 def confirm(conn: sqlite3.Connection, match: Match, note: str | None = None) -> int:

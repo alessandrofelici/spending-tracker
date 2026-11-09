@@ -1,5 +1,5 @@
-"""The dashboard's "Paid back" section (issue #19): confirm which transfers into
-checking paid back a card purchase, mark one by hand (cash, or a transfer that
+"""The dashboard's "Paid back" section (issue #19): confirm which Zelle payments
+into checking paid back a card purchase, mark one by hand (cash, or a transfer that
 never reached the connected account), and undo either. Matching is in
 reimburse.py; everything shown here stays on this machine."""
 
@@ -25,15 +25,15 @@ def render(month: str, purchases: pd.DataFrame) -> None:
         ).fetchone()
     if matches:
         st.write(
-            f"{len(matches)} transfer(s) into checking look like someone paying"
-            " you back. Confirm the ones that are, and only your share counts."
+            f"{len(matches)} Zelle payment(s) look like someone paying you back."
+            " Confirm the ones that are, and only your share counts."
         )
         for m in matches[:SHOWN]:
             _proposal(m)
         if len(matches) > SHOWN:
             st.caption(f"{len(matches) - SHOWN} more after these.")
     elif has_checking:
-        st.caption("No new transfers into checking look like paid-back purchases.")
+        st.caption("No new Zelle payments look like paid-back purchases.")
     else:
         st.caption(
             "Connect your checking account above to spot transfers that pay you"
