@@ -49,8 +49,8 @@ KEYRING_SERVICE = "spending-tracker-plaid"
 # short connect timeout, one dropped connection held the dashboard for a minute
 # per request, and a sync makes several. A connection that isn't up in time is
 # retried on a fresh one; nothing has been sent yet, so retrying is safe.
-CONNECT_TIMEOUT = 5
-CONNECT_RETRIES = 3
+CONNECT_TIMEOUT = 3
+CONNECT_RETRIES = 5
 TOKENS_PATH = db.DB_PATH.with_name("plaid-tokens.json")
 STATEMENT = "Plaid"  # what the statement column says for rows from Plaid
 # The most history Plaid allows; rows up to the cutover date are skipped anyway.
