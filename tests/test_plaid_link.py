@@ -207,3 +207,19 @@ def test_a_non_json_error_is_an_http_error():
     )
     with pytest.raises(httpx.HTTPStatusError):
         plaid.link_token()
+
+
+def test_requests_retry_a_connection_that_does_not_come_up(monkeypatch):
+    """A dropped connection is retried quickly instead of holding the page."""
+    made = []
+
+    def transport(**kwargs):
+        made.append(kwargs)
+        return httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"link_token": "link-x"})
+        )
+
+    monkeypatch.setattr(plaid_source.httpx, "HTTPTransport", transport)
+    assert Plaid("id", "secret").link_token() == "link-x"
+    assert made == [{"retries": plaid_source.CONNECT_RETRIES}]
+    assert plaid_source.CONNECT_TIMEOUT < 60

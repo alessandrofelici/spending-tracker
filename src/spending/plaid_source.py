@@ -45,6 +45,12 @@ HOSTS = {
     "production": "https://production.plaid.com",
 }
 KEYRING_SERVICE = "spending-tracker-plaid"
+# Some networks drop a new connection's first packets now and then. Without a
+# short connect timeout, one dropped connection held the dashboard for a minute
+# per request, and a sync makes several. A connection that isn't up in time is
+# retried on a fresh one; nothing has been sent yet, so retrying is safe.
+CONNECT_TIMEOUT = 5
+CONNECT_RETRIES = 3
 TOKENS_PATH = db.DB_PATH.with_name("plaid-tokens.json")
 STATEMENT = "Plaid"  # what the statement column says for rows from Plaid
 # The most history Plaid allows; rows up to the cutover date are skipped anyway.
@@ -121,8 +127,10 @@ class Plaid:
         return cls(client_id, secret, os.environ.get("PLAID_ENV", "sandbox"))
 
     def _post(self, path: str, body: dict) -> dict:
+        transport = self._transport or httpx.HTTPTransport(retries=CONNECT_RETRIES)
+        timeout = httpx.Timeout(60, connect=CONNECT_TIMEOUT)
         with httpx.Client(
-            base_url=HOSTS[self.env], transport=self._transport, timeout=60
+            base_url=HOSTS[self.env], transport=transport, timeout=timeout
         ) as http:
             resp = http.post(path, json=self._auth | body)
         try:
