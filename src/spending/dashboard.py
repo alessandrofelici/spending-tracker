@@ -7,6 +7,7 @@ import streamlit as st
 from spending.bank_sync import render as render_bank_sync
 from spending.db import DB_PATH, SPENDING_SQL, connect
 from spending.paid_back import render as render_paid_back
+from spending.period import Period, custom, presets, summarize
 
 # Validated colorblind-safe categorical order (fixed, never cycled).
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -54,20 +55,42 @@ df["group"] = df.category.where(df.category.isin(top), REST)
 colors = {c: PALETTE[i] for i, c in enumerate(top)} | {REST: REST_COLOR}
 order = top + [REST]
 
-months = sorted(df.month.unique(), reverse=True)
-month = st.selectbox("Month", months)
-cur = df[df.month == month]
-prev_month = (
-    months[months.index(month) + 1] if months.index(month) + 1 < len(months) else None
-)
+
+def pick_period(months: list[str]) -> Period:
+    """The sidebar's period picker: one month (the newest by default, as before),
+    a preset range, or a custom From/To month range."""
+    newest_first = sorted(months, reverse=True)
+    choices = presets(months)
+    with st.sidebar:
+        st.header("Period")
+        kind = st.selectbox(
+            "Show", ["One month", *choices, "Custom range"], key="period"
+        )
+        if kind == "One month":
+            month = st.selectbox("Month", newest_first, key="month")
+            return Period(month, month, month)
+        if kind == "Custom range":
+            start = st.selectbox(
+                "From", newest_first, index=len(months) - 1, key="from"
+            )
+            end = st.selectbox("To", newest_first, key="to")
+            return custom(start, end)
+        return choices[kind]
+
+
+period = pick_period(sorted(df.month.unique()))
+month = period.label  # how the period is named in headings
+cur = period.rows(df)
+prev = period.previous()
+has_prev = prev.end >= df.month.min()
 
 total = cur.amount.sum()
 paid_back = cur.paid_back.sum()
 c1, c2, c3 = st.columns(3)
 delta = None
-if prev_month:
-    prev_total = df[df.month == prev_month].amount.sum()
-    delta = f"{total - prev_total:+,.2f} vs {prev_month}"
+if has_prev:
+    prev_total = prev.rows(df).amount.sum()
+    delta = f"{total - prev_total:+,.2f} vs {prev.label}"
 c1.metric(
     "Total spent",
     f"${total:,.2f}",
@@ -85,6 +108,36 @@ c3.metric(
     f"${by_cat.iloc[-1]:,.2f}" if len(by_cat) else None,
     delta_color="off",
 )
+
+if not period.single:
+    stats = summarize(cur, period)
+    c1, c2, c3, c4 = st.columns(4)
+    unfinished = len(period.months) - len(stats.complete_months)
+    c1.metric(
+        "Average per month",
+        f"${stats.monthly_average:,.2f}" if stats.monthly_average is not None else "-",
+        help=(
+            f"Over {len(stats.complete_months)} complete month(s), counting months"
+            " with no spending as $0"
+            + (". This month isn't over yet, so it's left out." if unfinished else ".")
+        ),
+    )
+    c2.metric(
+        "Highest month",
+        stats.highest[0] if stats.highest else "-",
+        f"${stats.highest[1]:,.2f}" if stats.highest else None,
+        delta_color="off",
+    )
+    c3.metric(
+        "Lowest month",
+        stats.lowest[0] if stats.lowest else "-",
+        f"${stats.lowest[1]:,.2f}" if stats.lowest else None,
+        delta_color="off",
+    )
+    c4.metric(
+        "Average purchase",
+        f"${stats.average_purchase:,.2f}" if stats.average_purchase else "-",
+    )
 
 left, right = st.columns(2)
 
@@ -108,7 +161,9 @@ with left:
 
 with right:
     st.subheader("Month by month")
-    monthly = df.groupby(["month", "group"]).amount.sum().reset_index()
+    # One month: every month for context. A longer period: just its months.
+    shown_months = df if period.single else cur
+    monthly = shown_months.groupby(["month", "group"]).amount.sum().reset_index()
     fig = px.bar(
         monthly,
         x="month",
@@ -128,6 +183,20 @@ with right:
         hovermode="x unified",
     )
     st.plotly_chart(fig, width="stretch")
+
+if not period.single:
+    st.subheader(f"Categories, {month}")
+    st.dataframe(
+        stats.categories,
+        column_config={
+            "total": st.column_config.NumberColumn(format="$%.2f"),
+            "share": st.column_config.NumberColumn(format="percent"),
+            "monthly_average": st.column_config.NumberColumn(
+                "per month", format="$%.2f"
+            ),
+        },
+        width="stretch",
+    )
 
 st.subheader(f"Top merchants, {month}")
 merchants = (
@@ -157,7 +226,9 @@ if shown.paid_back.any():
 st.dataframe(
     shown.sort_values("date")[columns],
     column_config={
-        "date": st.column_config.DateColumn(format="MMM D"),
+        "date": st.column_config.DateColumn(
+            format="MMM D" if period.single else "MMM D, YYYY"
+        ),
         "amount": st.column_config.NumberColumn("your share", format="$%.2f"),
         "gross": st.column_config.NumberColumn("price", format="$%.2f"),
         "paid_back": st.column_config.NumberColumn("paid back", format="$%.2f"),

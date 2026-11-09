@@ -108,7 +108,7 @@ def test_dismissing_a_proposal(concert, app):
 
 def test_marking_a_purchase_by_hand(concert, app):
     at = app()
-    at.selectbox[-1].select("concert")
+    at.selectbox(key="paid_back_purchase").select("concert")
     at.number_input[0].set_value(120.0)
     at.text_input[0].input("split in half")
     at.button[-1].click()  # the form's Save
@@ -125,7 +125,7 @@ def test_marking_a_purchase_by_hand(concert, app):
 
 def test_marking_more_than_the_price_is_refused(concert, app):
     at = app()
-    at.selectbox[-1].select("dinner")
+    at.selectbox(key="paid_back_purchase").select("dinner")
     at.number_input[0].set_value(100.0)
     next(b for b in at.button if b.label == "Save").click()
     at.run()
@@ -196,3 +196,46 @@ def test_checking_waits_until_the_card_is_connected(conn, banks, app):
     at = app()
     keys = [b.key for b in at.button]
     assert "sign-in-card" in keys and "sign-in-reimbursements" not in keys
+
+
+# --- Time range (#27) ----------------------------------------------------------
+
+
+@pytest.fixture
+def months(conn):
+    db.insert_transactions(
+        conn,
+        [
+            row("a", "NORTHWIND GROCERY 0042 LANSING MI", 100.0, "2025-11-03"),
+            row("b", "NORTHWIND GROCERY 0042 LANSING MI", 80.0, "2025-12-03"),
+            row("c", "NOODLE HOUSE LANSING MI", 40.0, "2026-01-03"),
+            row("d", "NOODLE HOUSE LANSING MI", 60.0, "2026-02-03"),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+def test_one_month_is_still_the_default(months, app):
+    at = app()
+    assert at.selectbox(key="period").value == "One month"
+    assert at.selectbox(key="month").value == "2026-02"
+    assert metric(at, "Total spent") == "$60.00"
+    assert "Average per month" not in [m.label for m in at.metric]
+
+
+def test_a_year_and_a_custom_range(months, app):
+    at = app()
+    at.selectbox(key="period").select("2025").run()
+    assert metric(at, "Total spent") == "$180.00"
+    assert "Average per month" in [m.label for m in at.metric]
+    assert len(at.dataframe[-1].value) == 2  # the transactions in 2025
+
+    at.selectbox(key="period").select("Custom range").run()
+    at.selectbox(key="from").select("2025-12")
+    at.selectbox(key="to").select("2026-01").run()
+    assert not at.exception
+    assert metric(at, "Total spent") == "$120.00"
+    # Compared with the two months before: just November's $100.
+    total = next(m for m in at.metric if m.label == "Total spent")
+    assert "+20.00 vs 2025-10 to 2025-11" in total.delta
