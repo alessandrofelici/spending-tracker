@@ -36,6 +36,8 @@ Pick your bank and sign in on its own page. When asked which accounts to share, 
 
 The **Period** picker in the sidebar switches from one month (the default) to the last 3, 6 or 12 months, a whole year, all time, or a custom range of months. Everything on the page follows it. For more than one month you also see the average per month, the highest and lowest month, the average purchase and a table of categories with their share and monthly average. The month that isn't over yet counts in the total but not in those averages.
 
+The month-by-month chart has three tabs: **Overall**, **Travel & big one-offs** (the Travel category, plus any purchase that cost you $200 or more) and **Everyday** (everything else, i.e. what a normal month costs). The two add up to the overall total, which is also split under **Total spent**. Change the $200 with `ONE_OFF_MIN` in `.env`.
+
 ### Fixing categories
 
 When the dashboard says some transactions need categorizing, or one looks wrong:
