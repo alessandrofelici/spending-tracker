@@ -358,3 +358,43 @@ def test_dashboard_only_listens_on_this_machine():
     assert config["server"]["address"] == "127.0.0.1"
     assert set(config["server"]["allowedHosts"]) <= {"localhost", "127.0.0.1"}
     assert config["browser"]["gatherUsageStats"] is False
+
+
+def test_dashboard_stays_on_this_machine_without_settings():
+    # No flags means config.toml's 127.0.0.1 and localhost-only hosts apply.
+    assert cli.dashboard_flags({}) == []
+    assert cli.dashboard_flags({"DASHBOARD_ADDRESS": "", "DASHBOARD_HOSTS": " "}) == []
+    assert cli.dashboard_warnings({}) == []
+
+
+def test_dashboard_hosts_add_to_localhost():
+    flags = cli.dashboard_flags(
+        {
+            "DASHBOARD_ADDRESS": "100.64.0.5",
+            "DASHBOARD_HOSTS": "server.example.ts.net, 100.64.0.5,localhost",
+        }
+    )
+    assert flags == [
+        "--server.address=100.64.0.5",
+        "--server.allowedHosts=localhost",
+        "--server.allowedHosts=127.0.0.1",
+        "--server.allowedHosts=server.example.ts.net",
+        "--server.allowedHosts=100.64.0.5",
+    ]
+
+
+def test_dashboard_refuses_any_host():
+    with pytest.raises(SystemExit, match="DNS rebinding"):
+        cli.dashboard_flags({"DASHBOARD_HOSTS": "server.example.ts.net,*"})
+
+
+def test_dashboard_warns_when_reachable_from_other_machines():
+    assert cli.dashboard_warnings({"DASHBOARD_ADDRESS": "127.0.0.1"}) == []
+    notes = cli.dashboard_warnings({"DASHBOARD_ADDRESS": "0.0.0.0"})
+    assert any("no login" in n for n in notes)
+    assert any("every network interface" in n for n in notes)
+    assert any("DASHBOARD_HOSTS is empty" in n for n in notes)
+    notes = cli.dashboard_warnings(
+        {"DASHBOARD_ADDRESS": "100.64.0.5", "DASHBOARD_HOSTS": "100.64.0.5"}
+    )
+    assert len(notes) == 1
