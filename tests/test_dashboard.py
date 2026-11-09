@@ -196,3 +196,83 @@ def test_checking_waits_until_the_card_is_connected(conn, banks, app):
     at = app()
     keys = [b.key for b in at.button]
     assert "sign-in-card" in keys and "sign-in-reimbursements" not in keys
+
+
+# --- Checking Jev's categories (#14) --------------------------------------------
+
+
+@pytest.fixture
+def jev_placed(conn):
+    db.insert_transactions(
+        conn,
+        [
+            row(
+                "rent1", "MAPLE RESORT APARTMENTS", 900.0, "2026-03-01", "Travel", "llm"
+            ),
+            row(
+                "rent2", "MAPLE RESORT APARTMENTS", 900.0, "2026-04-01", "Travel", "llm"
+            ),
+            row(
+                "cafe",
+                "BLUE HERON CAFE EAST LANSING MI",
+                6.0,
+                "2026-04-02",
+                "Dining",
+                "llm",
+            ),
+            row(
+                "mine",
+                "PETSMART 1234 LANSING MI",
+                30.0,
+                "2026-04-03",
+                "Shopping",
+                "manual",
+            ),
+            row("unsure", "QUIET PINE BOOKS OKEMOS MI", 12.0, "2026-04-04"),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+def check(app) -> AppTest:
+    at = app()
+    at.sidebar.radio(key="view").set_value("Check categories").run()
+    assert not at.exception
+    return at
+
+
+def test_stores_jev_placed_are_listed_biggest_first(jev_placed, app):
+    at = check(app)
+    keys = [b.key for b in at.button]
+    rent, cafe = (
+        row("x", d)["merchant"]
+        for d in ("MAPLE RESORT APARTMENTS", "BLUE HERON CAFE EAST LANSING MI")
+    )
+    # Only Jev's picks: not the store you set, nor the one waiting in review.
+    assert keys == [f"jev-ok-{rent}", f"jev-ok-{cafe}"]
+
+
+def test_fixing_a_store_sticks_for_all_its_purchases(jev_placed, app):
+    rent = row("x", "MAPLE RESORT APARTMENTS")["merchant"]
+    at = check(app)
+    at.selectbox(key=f"jev-cat-{rent}").select("Bills & Utilities").run()
+    button(at, f"jev-save-{rent}").click().run()
+    assert not at.exception
+    rows = jev_placed.execute(
+        "SELECT DISTINCT category, source FROM transactions WHERE merchant = ?", (rent,)
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [("Bills & Utilities", "manual")]
+    assert db.get_memory(jev_placed)[rent] == "Bills & Utilities"
+    assert f"jev-ok-{rent}" not in [b.key for b in at.button]
+
+
+def test_looks_right_keeps_the_category_and_stops_asking(jev_placed, app):
+    cafe = row("x", "BLUE HERON CAFE EAST LANSING MI")["merchant"]
+    at = check(app)
+    button(at, f"jev-ok-{cafe}").click().run()
+    [r] = jev_placed.execute(
+        "SELECT category, source FROM transactions WHERE merchant = ?", (cafe,)
+    ).fetchall()
+    assert tuple(r) == ("Dining", "manual")
+    assert f"jev-ok-{cafe}" not in [b.key for b in at.button]

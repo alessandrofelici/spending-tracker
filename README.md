@@ -48,6 +48,8 @@ In `review`, type a category's number, Enter to accept Jev's `[suggestion]`, `+`
 
 If `spend set` matches several stores, it lists them: use the exact name, or add `--all-matches` to set them all.
 
+Jev can also be confidently wrong (rent at an apartment complex that sounds like a resort, filed as Travel), and those stores never reach `spend review`. To catch them, switch **View** in the dashboard's sidebar to **Check categories**: it lists every store Jev placed that you haven't checked, biggest spending first. Pick the right category and **Save**, or click **Looks right**. Either way the choice is yours from then on, for that store's past and future transactions, and the store leaves the list. If Jev keeps filing the wrong stores under one category, make that category's description in `categories.toml` clearer: it's what Jev reads.
+
 ### Purchases you were paid back for
 
 When friends pay you back for their share (half the gas, their part of a restaurant bill, or the whole price of a ticket you bought for them), only your share is spending. The **Paid back** section of the dashboard takes the rest off: totals, charts and top stores then count what the purchase cost *you*, and the transactions table shows the full price next to it.
