@@ -8,6 +8,7 @@ from spending.bank_sync import render as render_bank_sync
 from spending.db import DB_PATH, SPENDING_SQL, connect
 from spending.paid_back import render as render_paid_back
 from spending.period import Period, custom, presets, summarize
+from spending.split import EVERYDAY, ONE_OFF, kind, one_off_min
 
 # Validated colorblind-safe categorical order (fixed, never cycled).
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -52,6 +53,7 @@ top = (
     .tolist()
 )
 df["group"] = df.category.where(df.category.isin(top), REST)
+df["kind"] = kind(df)
 colors = {c: PALETTE[i] for i, c in enumerate(top)} | {REST: REST_COLOR}
 order = top + [REST]
 
@@ -78,6 +80,33 @@ def pick_period(months: list[str]) -> Period:
         return choices[kind]
 
 
+def monthly_chart(rows: pd.DataFrame, key: str) -> None:
+    """Spending per month, stacked by category (the same colors in every chart)."""
+    if rows.empty:
+        st.caption("Nothing in this period.")
+        return
+    monthly = rows.groupby(["month", "group"]).amount.sum().reset_index()
+    fig = px.bar(
+        monthly,
+        x="month",
+        y="amount",
+        color="group",
+        # Plotly orders category axes by first appearance across traces, so a
+        # month missing from the first group's trace would end up out of order.
+        category_orders={"group": order, "month": sorted(monthly.month.unique())},
+        color_discrete_map=colors,
+        labels={"amount": "Spent ($)", "month": "", "group": "Category"},
+    )
+    fig.update_traces(hovertemplate="%{fullData.name}: $%{y:,.2f}<extra></extra>")
+    fig.update_layout(
+        height=420,
+        margin={"l": 0, "r": 10, "t": 10, "b": 0},
+        xaxis_type="category",
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, width="stretch", key=f"monthly-{key}")
+
+
 period = pick_period(sorted(df.month.unique()))
 month = period.label  # how the period is named in headings
 cur = period.rows(df)
@@ -101,6 +130,10 @@ c1.metric(
     else None,
 )
 c2.metric("Transactions", f"{(cur.amount > 0).sum()}")
+everyday_total = cur[cur.kind == EVERYDAY].amount.sum()
+c1.caption(
+    f"Everyday ${everyday_total:,.2f} · {ONE_OFF.lower()} ${total - everyday_total:,.2f}"
+)
 by_cat = cur.groupby("category").amount.sum().sort_values()
 c3.metric(
     "Biggest category",
@@ -163,26 +196,18 @@ with right:
     st.subheader("Month by month")
     # One month: every month for context. A longer period: just its months.
     shown_months = df if period.single else cur
-    monthly = shown_months.groupby(["month", "group"]).amount.sum().reset_index()
-    fig = px.bar(
-        monthly,
-        x="month",
-        y="amount",
-        color="group",
-        # Plotly orders category axes by first appearance across traces, so a
-        # month missing from the first group's trace would end up out of order.
-        category_orders={"group": order, "month": sorted(monthly.month.unique())},
-        color_discrete_map=colors,
-        labels={"amount": "Spent ($)", "month": "", "group": "Category"},
-    )
-    fig.update_traces(hovertemplate="%{fullData.name}: $%{y:,.2f}<extra></extra>")
-    fig.update_layout(
-        height=420,
-        margin={"l": 0, "r": 10, "t": 10, "b": 0},
-        xaxis_type="category",
-        hovermode="x unified",
-    )
-    st.plotly_chart(fig, width="stretch")
+    overall, one_off, everyday = st.tabs(["Overall", ONE_OFF, EVERYDAY])
+    with overall:
+        monthly_chart(shown_months, "overall")
+    with one_off:
+        st.caption(
+            f"Travel, plus any purchase of ${one_off_min():,.0f} or more"
+            " (your share). Set the amount with ONE_OFF_MIN in .env."
+        )
+        monthly_chart(shown_months[shown_months.kind == ONE_OFF], "one-off")
+    with everyday:
+        st.caption("Everything else: what a normal month costs.")
+        monthly_chart(shown_months[shown_months.kind == EVERYDAY], "everyday")
 
 if not period.single:
     st.subheader(f"Categories, {month}")

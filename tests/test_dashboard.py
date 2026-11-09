@@ -2,6 +2,10 @@
 and money coming in to checking is never spending. Runs the real app offline
 (Streamlit's AppTest) against a throwaway database with made-up rows."""
 
+import base64
+import json
+
+import numpy as np
 import pytest
 import streamlit as st
 from fakes import CHECKING, txn
@@ -239,3 +243,49 @@ def test_a_year_and_a_custom_range(months, app):
     # Compared with the two months before: just November's $100.
     total = next(m for m in at.metric if m.label == "Total spent")
     assert "+20.00 vs 2025-10 to 2025-11" in total.delta
+
+
+# --- Everyday vs travel and big one-offs (#26) ---------------------------------
+
+
+def chart_total(at: AppTest, key: str) -> float:
+    """Sum of every bar in the monthly chart with this key."""
+    chart = next(c for c in at.get("plotly_chart") if f"monthly-{key}" in c.proto.id)
+    fig = json.loads(chart.proto.spec)
+    total = 0.0
+    for trace in fig["data"]:
+        y = trace["y"]
+        if isinstance(y, dict):  # Plotly's binary encoding
+            y = np.frombuffer(base64.b64decode(y["bdata"]), dtype=y["dtype"])
+        total += float(sum(y))
+    return total
+
+
+def test_everyday_and_one_offs_add_up_to_the_total(conn, app):
+    db.insert_transactions(
+        conn,
+        [
+            row("hotel", "EXAMPLE HOTEL 0042", 90.0, "2026-03-02", "Travel", "manual"),
+            row(
+                "laptop",
+                "EXAMPLE ELECTRONICS",
+                900.0,
+                "2026-03-05",
+                "Shopping",
+                "manual",
+            ),
+            row("food", "NORTHWIND GROCERY 0042 LANSING MI", 60.0, "2026-03-07"),
+        ],
+    )
+    conn.commit()
+    at = app()
+    assert metric(at, "Total spent") == "$1,050.00"
+    assert any("Everyday $60.00" in c.value for c in at.caption)
+    assert [t.label for t in at.tabs] == [
+        "Overall",
+        "Travel & big one-offs",
+        "Everyday",
+    ]
+    assert chart_total(at, "overall") == 1050.0
+    assert chart_total(at, "one-off") == 990.0
+    assert chart_total(at, "everyday") == 60.0
