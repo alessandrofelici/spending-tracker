@@ -10,8 +10,13 @@ Safety measures:
     for your bank login is a credential too: it's kept in the OS keyring, or where
     there is none (e.g. WSL) in a file next to the database that only you can
     read. It never reaches the browser, the database or a log.
-  * Only credit accounts are stored (the card, or a credit line). Checking and
-    savings would double count card payments (documents/checking-ideas.md).
+  * From the card login, only credit accounts are stored (the card, or a credit
+    line). Checking and savings would double count card payments
+    (documents/checking-ideas.md).
+  * A second login, for checking (role 'reimbursements'), stores only money
+    coming in, to spot purchases friends paid you back for (reimburse.py). Those
+    rows are never spending and never reach Jev: P2P transfers carry the names
+    of private individuals.
   * Pending transactions are skipped: they can still change amount or disappear.
   * Jev sees what it sees on a CSV import: one redacted description per new
     merchant. The bank's wrapper around the merchant, which includes the date,
@@ -84,7 +89,9 @@ class SyncResult:
     updated: int = 0
     removed: int = 0
     flagged: int = 0  # new rows left as Other for `spend review`
-    skipped_accounts: list[str] = field(default_factory=list)  # not credit, not stored
+    skipped_accounts: list[str] = field(
+        default_factory=list
+    )  # other accounts, not stored
     status: str = ""  # Plaid's transactions_update_status
 
 
@@ -132,9 +139,13 @@ class Plaid:
             )
         return data
 
-    def link_token(self, access_token: str | None = None) -> str:
+    def link_token(
+        self, access_token: str | None = None, checking_only: bool = False
+    ) -> str:
         """A token that opens Plaid Link: to add a bank login, or with
-        access_token, to sign in to an existing one again (update mode)."""
+        access_token, to sign in to an existing one again (update mode).
+        checking_only offers only checking accounts to share (the login that
+        spots paid-back purchases)."""
         body: dict = {
             "client_name": "Spending Tracker",
             "language": "en",
@@ -147,6 +158,10 @@ class Plaid:
         else:
             body["products"] = ["transactions"]
             body["transactions"] = {"days_requested": DAYS_REQUESTED}
+            if checking_only:
+                body["account_filters"] = {
+                    "depository": {"account_subtypes": ["checking"]}
+                }
         return self._post("/link/token/create", body)["link_token"]
 
     def exchange(self, public_token: str) -> tuple[str, str]:
@@ -242,18 +257,23 @@ def _write_tokens(tokens: dict[str, str]) -> None:
 
 
 def link(
-    conn: sqlite3.Connection, plaid: Plaid, public_token: str, institution: str | None
+    conn: sqlite3.Connection,
+    plaid: Plaid,
+    public_token: str,
+    institution: str | None,
+    role: str = "card",
 ) -> tuple[str, list[str]]:
     """Finish signing in: swap Link's public token for an access token, store it
-    and record the bank login, then revoke any earlier one (one bank for now).
+    and record the bank login, then revoke any earlier one with the same role
+    (one card login and one checking login).
     Returns where the token was stored, and a sentence for each earlier login
     that couldn't be revoked at Plaid."""
     access_token, item_id = plaid.exchange(public_token)
     where = save_token(item_id, access_token)
-    db.add_plaid_item(conn, item_id, institution)
+    db.add_plaid_item(conn, item_id, institution, role)
     conn.commit()  # the new login is safe before the old ones are touched
     problems = []
-    for old in db.get_plaid_items(conn)[1:]:
+    for old in db.get_plaid_items(conn, role)[1:]:
         name = old["institution"] or "the earlier bank login"
         try:
             if not unlink(conn, plaid, old["item_id"]):
@@ -300,20 +320,25 @@ def sync(
     """Apply what changed at the bank since this bank login's last sync."""
     with _lock:
         item = conn.execute(
-            "SELECT cursor, cutover FROM plaid_items WHERE item_id = ?", (item_id,)
+            "SELECT cursor, cutover, role FROM plaid_items WHERE item_id = ?",
+            (item_id,),
         ).fetchone()
         changes = plaid.changes(access_token, item["cursor"])
-        credit = {i for i, a in changes.accounts.items() if _is_credit(a)}
+        checking = item["role"] == "reimbursements"
+        keep = _is_checking if checking else _is_credit
+        tracked = {i for i, a in changes.accounts.items() if keep(a)}
         result = SyncResult(
             status=changes.status,
             skipped_accounts=sorted(
-                a["name"] for i, a in changes.accounts.items() if i not in credit
+                a["name"] for i, a in changes.accounts.items() if i not in tracked
             ),
         )
 
         def wanted(t: dict) -> bool:
             return (
-                t["account_id"] in credit
+                t["account_id"] in tracked
+                # From checking, only money in (Plaid: negative = money in).
+                and (not checking or float(t["amount"]) < 0)
                 and not t["pending"]
                 # Up to the cutover, the CSV import already has it.
                 and (item["cutover"] is None or t["date"] > item["cutover"])
@@ -331,7 +356,11 @@ def sync(
         result.removed = db.delete_plaid_transactions(conn, changes.removed)
 
         found = [(t["transaction_id"], txn) for t in new if (txn := _transaction(t))]
-        if found:
+        if found and checking:
+            result.added = db.insert_transactions(
+                conn, [_checking_row(tid, txn) for tid, txn in found]
+            )
+        elif found:
             ids, txns = zip(*found, strict=True)
             rows, answers = categorize_rows(
                 conn, txns, ids, STATEMENT, source_kind="plaid", use_llm=use_llm
@@ -348,6 +377,21 @@ def _is_credit(account: dict) -> bool:
     return account["type"] == "credit" or (
         account["type"] == "loan" and account.get("subtype") == "line of credit"
     )
+
+
+def _is_checking(account: dict) -> bool:
+    return account["type"] == "depository" and account.get("subtype") == "checking"
+
+
+def _checking_row(tid: str, t: Transaction) -> dict:
+    """Money in to checking: stored as is, never categorized or sent to Jev."""
+    return _fields(tid, t) | {
+        "category": "Incoming",
+        "source": "checking",
+        "statement": STATEMENT,
+        "source_kind": "plaid",
+        "account": "checking",
+    }
 
 
 def _transaction(t: dict) -> Transaction | None:

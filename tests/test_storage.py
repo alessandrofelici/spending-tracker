@@ -100,7 +100,8 @@ def test_setting_a_category_moves_only_that_merchant(conn):
     assert db.get_manual_merchants(conn) == {merchant}
 
 
-# Tables as they were before the source_kind and latency_ms columns existed.
+# Tables as they were before the source_kind, latency_ms, account and role
+# columns existed.
 OLD_SCHEMA = """
 CREATE TABLE transactions (
     id TEXT PRIMARY KEY, month TEXT NOT NULL, date TEXT NOT NULL,
@@ -116,6 +117,10 @@ INSERT INTO transactions VALUES ('pay', '2026-03', '2026-03-20', 'ACH PMT 000555
 INSERT INTO transactions VALUES ('shop', '2026-03', '2026-03-14', 'PETSMART 1234 LANSING MI',
     'PETSMART LANSING', 25, 'Shopping', 'rule', 'export.csv');
 INSERT INTO jev_answers VALUES ('PETSMART LANSING', 'Shopping', 0.9, 'confident', 'abc');
+CREATE TABLE plaid_items (
+    item_id TEXT PRIMARY KEY, institution TEXT, cursor TEXT, cutover TEXT, last_synced TEXT
+);
+INSERT INTO plaid_items (item_id, institution) VALUES ('card-login', 'Card bank');
 """
 
 
@@ -131,6 +136,8 @@ def test_older_databases_upgrade_without_losing_rows(db_path):
     assert rows["pay"]["source"] == "payment"  # payment rows get their own source
     assert rows["shop"]["source"] == "rule"  # other old rows keep theirs
     assert {r["source_kind"] for r in rows.values()} == {"csv"}
+    assert {r["account"] for r in rows.values()} == {"credit"}  # all card rows
+    assert [i["role"] for i in db.get_plaid_items(conn)] == ["card"]
     assert db.get_answers(conn)["PETSMART LANSING"]["latency_ms"] is None
     conn.close()
 

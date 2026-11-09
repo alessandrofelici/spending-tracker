@@ -5,7 +5,8 @@ import plotly.express as px
 import streamlit as st
 
 from spending.bank_sync import render as render_bank_sync
-from spending.db import DB_PATH, connect
+from spending.db import DB_PATH, SPENDING_SQL, connect
+from spending.paid_back import render as render_paid_back
 
 # Validated colorblind-safe categorical order (fixed, never cycled).
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -18,8 +19,12 @@ st.set_page_config(page_title="Spending", layout="wide")
 
 @st.cache_data(ttl=30)
 def load() -> pd.DataFrame:
+    """Card rows, each counted for what it cost you: what friends paid back of a
+    purchase comes off (`gross` keeps the full price). Checking isn't spending."""
     with connect(DB_PATH) as conn:
-        df = pd.read_sql("SELECT * FROM transactions", conn, parse_dates=["date"])
+        df = pd.read_sql(SPENDING_SQL, conn, parse_dates=["date"])
+    df["gross"] = df.amount
+    df["amount"] = df.gross - df.paid_back
     return df[~df.category.isin(EXCLUDED)]
 
 
@@ -57,12 +62,21 @@ prev_month = (
 )
 
 total = cur.amount.sum()
+paid_back = cur.paid_back.sum()
 c1, c2, c3 = st.columns(3)
 delta = None
 if prev_month:
     prev_total = df[df.month == prev_month].amount.sum()
     delta = f"{total - prev_total:+,.2f} vs {prev_month}"
-c1.metric("Total spent", f"${total:,.2f}", delta, delta_color="inverse")
+c1.metric(
+    "Total spent",
+    f"${total:,.2f}",
+    delta,
+    delta_color="inverse",
+    help=f"Not counting ${paid_back:,.2f} friends paid you back."
+    if paid_back
+    else None,
+)
 c2.metric("Transactions", f"{(cur.amount > 0).sum()}")
 by_cat = cur.groupby("category").amount.sum().sort_values()
 c3.metric(
@@ -132,14 +146,21 @@ st.dataframe(
     width="stretch",
 )
 
+render_paid_back(month, cur)
+
 st.subheader("Transactions")
 picked = st.multiselect("Categories", sorted(cur.category.unique()))
 shown = cur[cur.category.isin(picked)] if picked else cur
+columns = ["date", "description", "amount", "category", "source"]
+if shown.paid_back.any():
+    columns[3:3] = ["gross", "paid_back"]
 st.dataframe(
-    shown.sort_values("date")[["date", "description", "amount", "category", "source"]],
+    shown.sort_values("date")[columns],
     column_config={
         "date": st.column_config.DateColumn(format="MMM D"),
-        "amount": st.column_config.NumberColumn(format="$%.2f"),
+        "amount": st.column_config.NumberColumn("your share", format="$%.2f"),
+        "gross": st.column_config.NumberColumn("price", format="$%.2f"),
+        "paid_back": st.column_config.NumberColumn("paid back", format="$%.2f"),
     },
     hide_index=True,
     width="stretch",

@@ -22,7 +22,7 @@ Run the tests before and after any big change, especially to storage, bank sync 
 uv run pytest
 ```
 
-They check that your data stays safe (the database and token file are private, tokens never reach the database, only redacted new merchants reach Jev, only keys and the token reach Plaid, bank data is git-ignored and blocked by the commit hook, the dashboard only listens on this machine), that imports never duplicate or overwrite your choices, and that bank sync handles new, changed, removed and pending transactions, paging and errors.
+They check that your data stays safe (the database and token file are private, tokens never reach the database, only redacted new merchants reach Jev, only keys and the token reach Plaid, bank data is git-ignored and blocked by the commit hook, the dashboard only listens on this machine, money into checking never reaches Jev), that imports never duplicate or overwrite your choices, that bank sync handles new, changed, removed and pending transactions, paging and errors, and that paid-back purchases are matched, capped and counted correctly. `tests/test_dashboard.py` runs the real dashboard offline through Streamlit's AppTest.
 
 They run offline in a few seconds and never touch your data: each test gets its own throwaway database, the example categories, no API keys, and a fake Plaid (`tests/fakes.py`) with made-up transactions. Any real network request fails the test.
 
@@ -52,14 +52,16 @@ Paths marked "git-ignored" belong to each user and are never committed.
 │   ├── pipeline.py             categorize → store, shared by CSV import and bank sync
 │   ├── db.py                   SQLite schema, migrations, queries
 │   ├── plaid_source.py         Plaid client, /transactions/sync, token storage
-│   ├── bank_sync.py            the dashboard's sync on open and sign-in card
+│   ├── bank_sync.py            the dashboard's sync on open and sign-in cards (card + checking)
 │   ├── dashboard.py            Streamlit app: the spending charts
+│   ├── paid_back.py            the dashboard's "Paid back" section: confirm, mark, undo
+│   ├── reimburse.py            matches money into checking to the purchases it paid back
 │   └── jev_eval.py             `python -m spending.jev_eval`: Jev vs the example keyword rules
 ├── statements/                 the user's CSV exports (git-ignored)
 └── tests/                      offline tests; fakes.py is a fake Plaid
 ```
 
-- **`data/`**: `spending.db` (SQLite) is created on first import, with the tables `transactions`, `merchant_memory`, `jev_answers` and `plaid_items`, each commented in `db.py`. `plaid-tokens.json` holds the Plaid access token, only where there's no OS keyring (e.g. WSL). The folder and its files are created owner-only (700 / 600).
+- **`data/`**: `spending.db` (SQLite) is created on first import, with the tables `transactions` (card rows, plus money into checking for paid-back purchases), `merchant_memory`, `jev_answers`, `plaid_items` (a card login and optionally a checking one), `reimbursements` and `dismissed_matches`, each commented in `db.py`. `plaid-tokens.json` holds the Plaid access token, only where there's no OS keyring (e.g. WSL). The folder and its files are created owner-only (700 / 600).
 - **`src/spending/.streamlit/config.toml`** applies however the dashboard is started: it listens only on `127.0.0.1`, accepts only the hostnames `localhost` and `127.0.0.1` (blocks DNS rebinding), and sends no usage statistics.
 - **`categories.toml`** is copied from the example at setup, and `+` in `spend review` adds to it. Its `[rules]` are only labels for `jev_eval`; imports don't use them. Each git worktree needs its own copy, or set `SPENDING_CATEGORIES` in `.env` to share one.
 
@@ -102,6 +104,7 @@ flowchart TB
         D5["dashboard.py"]
         D6["jev_eval.py"]
         D7["bank_sync.py<br/>+ plaid_source.py"]
+        D8["paid_back.py<br/>+ reimburse.py"]
     end
 
     subgraph STORE["💾 Generated"]
@@ -112,6 +115,8 @@ flowchart TB
     U2 --> D1
     U3 --> D5
     D5 --> D7
+    D5 --> D8
+    D8 --> D4
     C1 --> D3
     C2 --> D3
     C2 --> D7
@@ -134,6 +139,8 @@ flowchart LR
     pipeline["pipeline.py<br/>categorize → store"]
     banksync["bank_sync.py<br/>sync on open, sign-in"]
     plaidsrc["plaid_source.py<br/>Plaid client + sync"]
+    paidback["paid_back.py<br/>Paid back section"]
+    reimb["reimburse.py<br/>match transfers to purchases"]
     toml[("categories.toml")]
     sqlite[("data/spending.db")]
     llm{{"Jev via OpenRouter<br/>typesafe/jev-1.13"}}
@@ -152,6 +159,10 @@ flowchart LR
     classify --> db
     dash --> banksync
     dash --> db
+    dash --> paidback
+    paidback --> reimb
+    paidback --> db
+    reimb --> db
     banksync --> plaidsrc
     banksync --> db
     plaidsrc --> parser
