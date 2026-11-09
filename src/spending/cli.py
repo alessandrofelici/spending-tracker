@@ -54,9 +54,9 @@ def cmd_import(args) -> None:
 def cmd_review(args) -> None:
     conn = db.connect()
     categories = load_config()
-    sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source = 'fallback'"
+    sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE account = 'credit' AND source = 'fallback'"
     if args.all:
-        sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE source != 'manual'"
+        sql = "SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s FROM transactions WHERE account = 'credit' AND source != 'manual'"
     merchants = conn.execute(sql + " GROUP BY merchant ORDER BY s DESC").fetchall()
     if not merchants:
         print("Nothing to review.")
@@ -74,7 +74,7 @@ def resort(conn, categories: list[str], new: str) -> None:
         """SELECT merchant, MIN(description) d, COUNT(*) n, SUM(amount) s,
                   MIN(category) category, MIN(source = 'fallback') fallback,
                   MAX(source = 'manual') manual
-           FROM transactions GROUP BY merchant
+           FROM transactions WHERE account = 'credit' GROUP BY merchant
            HAVING MAX(source = 'payment') = 0 ORDER BY s DESC"""
     ).fetchall()
     key = criteria_key(load_criteria(categories))
@@ -169,7 +169,8 @@ def review_merchants(conn, categories: list[str], merchants: list) -> None:
     )
     for m in merchants:
         current, source = conn.execute(
-            "SELECT category, source FROM transactions WHERE merchant = ? LIMIT 1",
+            "SELECT category, source FROM transactions"
+            " WHERE merchant = ? AND account = 'credit' LIMIT 1",
             (m["merchant"],),
         ).fetchone()
         suggestion, note = _suggest(answers.get(m["merchant"]), categories, current)

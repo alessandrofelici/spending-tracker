@@ -14,13 +14,14 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
-from fakes import ACCESS_TOKEN, txn
+from fakes import ACCESS_TOKEN, CHECKING, txn
 
 from spending import classify, cli, db, plaid_source
 from spending.parser import Transaction, parse_csv, transaction_ids
 from spending.pipeline import categorize_rows, save_rows
 
 ROOT = Path(__file__).resolve().parents[1]
+CHECKING_ID = CHECKING["account_id"]
 
 
 def mode(path: Path) -> int:
@@ -252,6 +253,40 @@ def test_plaid_wrapper_and_its_date_are_removed():
     )
     assert t is not None
     assert t.description == "PETSMART 1234 LANSING MI"
+
+
+def test_money_into_checking_never_reaches_jev_even_with_a_key(
+    monkeypatch, conn, db_path, fake_plaid, capsys
+):
+    """Transfers name private individuals (documents/checking-ideas.md)."""
+    asked = []
+    monkeypatch.setattr(classify, "openrouter_key", lambda: "test-key")
+    monkeypatch.setattr(
+        classify, "classify_with_llm", lambda d, _cats: asked.append(dict(d)) or {}
+    )
+    db.add_plaid_item(conn, "item-chk", "Example Bank", "reimbursements")
+    fake_plaid.page(
+        added=[
+            txn(
+                "in",
+                "2026-03-20",
+                "ZELLE FROM JANE DOE",
+                -80.0,
+                CHECKING_ID,
+                wrap=False,
+            ),
+            txn("dep", "2026-03-21", "MOBILE DEPOSIT", -40.0, CHECKING_ID, wrap=False),
+        ]
+    )
+    result = plaid_source.sync(conn, fake_plaid.client(), "item-chk", ACCESS_TOKEN)
+    assert result.added == 2 and asked == []
+    # ...and `spend review --all` never brings them up to categorize either.
+    conn.commit()
+    connect = db.connect
+    monkeypatch.setattr(db, "connect", lambda: connect(db_path))
+    cli.cmd_review(Namespace(all=True))
+    assert capsys.readouterr().out.strip() == "Nothing to review."
+    assert db.find_merchants(conn, "zelle") == []
 
 
 # --- Guards in the repo -------------------------------------------------------

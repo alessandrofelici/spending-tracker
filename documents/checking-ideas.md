@@ -1,6 +1,6 @@
 # Checking Ideas
 
-**Status: open** ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)). Nothing here is built yet.
+**Status: open** ([#7](https://github.com/alessandrofelici/spending-tracker/issues/7)). Not built yet. Related and built for [#19](https://github.com/alessandrofelici/spending-tracker/issues/19): a second Plaid login for a checking account that stores only money coming in, to match it to purchases friends paid back (`account = 'checking'`, never spending, never sent to Jev; see `reimburse.py`). The `account` column and the matcher with its confirm step are a starting point for phases 1 and 3 here.
 
 **Goal:** Show *all* money going out, including what never touches the credit card, without counting anything twice.
 

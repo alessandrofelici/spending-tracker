@@ -30,7 +30,8 @@ def rule_merchants(conn, rules: dict[str, list[str]]) -> dict[str, tuple[str, st
     """merchant -> (rule category, example description), for stored merchants a rule matches."""
     rows = conn.execute(
         """SELECT merchant, MIN(description) AS description
-           FROM transactions WHERE source != 'payment' GROUP BY merchant"""
+           FROM transactions WHERE source != 'payment' AND account = 'credit'
+           GROUP BY merchant"""
     )
     out = {}
     for r in rows:
