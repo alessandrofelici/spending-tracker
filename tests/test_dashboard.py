@@ -239,3 +239,18 @@ def test_a_year_and_a_custom_range(months, app):
     # Compared with the two months before: just November's $100.
     total = next(m for m in at.metric if m.label == "Total spent")
     assert "+20.00 vs 2025-10 to 2025-11" in total.delta
+
+
+# --- Analysis view (#16) -------------------------------------------------------
+
+
+def test_the_analysis_view_runs(months, app):
+    at = app()
+    at.sidebar.radio(key="view").set_value("Analysis").run()
+    assert not at.exception
+    headers = [h.value for h in at.subheader]
+    assert "One category over time" in headers
+    assert "What changed between two months" in headers
+    assert "Total spent" not in [m.label for m in at.metric]  # the spending page is off
+    at.selectbox(key="cmp_before").select("2025-11").run()
+    assert not at.exception

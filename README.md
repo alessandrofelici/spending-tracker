@@ -36,6 +36,8 @@ Pick your bank and sign in on its own page. When asked which accounts to share, 
 
 The **Period** picker in the sidebar switches from one month (the default) to the last 3, 6 or 12 months, a whole year, all time, or a custom range of months. Everything on the page follows it. For more than one month you also see the average per month, the highest and lowest month, the average purchase and a table of categories with their share and monthly average. The month that isn't over yet counts in the total but not in those averages.
 
+Switch **View** in the sidebar to **Analysis** to see how spending is changing: this month so far against what past months had spent by the same day, one category month by month (against the month before and its average), what changed between two months, each category's usual month and the months that stood out, and one store over time. Each has a **How it's computed** note with the formula and the numbers behind it. A one-month period looks at the 12 months up to it.
+
 ### Fixing categories
 
 When the dashboard says some transactions need categorizing, or one looks wrong:
