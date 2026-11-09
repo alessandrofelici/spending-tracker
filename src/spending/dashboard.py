@@ -7,6 +7,7 @@ import streamlit as st
 from spending.analysis_tab import render as render_analysis
 from spending.bank_sync import render as render_bank_sync
 from spending.db import DB_PATH, SPENDING_SQL, connect
+from spending.jev_check import render as render_jev_check
 from spending.paid_back import render as render_paid_back
 from spending.period import Period, custom, presets, summarize
 from spending.split import EVERYDAY, ONE_OFF, kind, one_off_min
@@ -42,6 +43,15 @@ if df.empty:
         + ("Sign in to your bank above, or import" if bank == "sign_in" else "Import")
         + " a statement with `uv run spend import statements/<file>.csv`."
     )
+    st.stop()
+
+# One switch for the dashboard's views; the period picker below applies to the
+# first two.
+view = st.sidebar.radio(
+    "View", ["Spending", "Analysis", "Check categories"], key="view"
+)
+if view == "Check categories":
+    render_jev_check()
     st.stop()
 
 # Top 7 categories by all-time spend keep their own color; color follows the
@@ -109,7 +119,6 @@ def monthly_chart(rows: pd.DataFrame, key: str) -> None:
 
 
 period = pick_period(sorted(df.month.unique()))
-view = st.sidebar.radio("View", ["Spending", "Analysis"], key="view")
 if view == "Analysis":
     render_analysis(df, period)
     st.stop()
