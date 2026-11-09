@@ -34,6 +34,12 @@ Pick your bank and sign in on its own page. When asked which accounts to share, 
 
 `uv run spend dashboard` is the whole routine. Each time it opens, it gets new transactions from your bank, categorizes them, and shows the month's total against the month before, spending by category and month by month, your top merchants, and every transaction. It runs at `http://127.0.0.1:8501`; stop it with Ctrl+C.
 
+The **Period** picker in the sidebar switches from one month (the default) to the last 3, 6 or 12 months, a whole year, all time, or a custom range of months. Everything on the page follows it. For more than one month you also see the average per month, the highest and lowest month, the average purchase and a table of categories with their share and monthly average. The month that isn't over yet counts in the total but not in those averages.
+
+The month-by-month chart has three tabs: **Overall**, **Travel & big one-offs** (the Travel category, plus any purchase that cost you $200 or more) and **Everyday** (everything else, i.e. what a normal month costs). The two add up to the overall total, which is also split under **Total spent**. Change the $200 with `ONE_OFF_MIN` in `.env`.
+
+Switch **View** in the sidebar to **Analysis** to see how spending is changing: this month so far against what past months had spent by the same day, one category month by month (against the month before and its average), what changed between two months, each category's usual month and the months that stood out, and one store over time. Each has a **How it's computed** note with the formula and the numbers behind it. A one-month period looks at the 12 months up to it.
+
 ### Fixing categories
 
 When the dashboard says some transactions need categorizing, or one looks wrong:
@@ -47,6 +53,8 @@ uv run spend set kroger Groceries   # one store directly; part of its name works
 In `review`, type a category's number, Enter to accept Jev's `[suggestion]`, `+` to add a new category, `s` to skip or `q` to stop. Your choice applies to all of that store's transactions, past and future, and Jev never overrides it. After `+`, Jev is asked again, and stores that fit the new category move into it (ones you set yourself are only proposed).
 
 If `spend set` matches several stores, it lists them: use the exact name, or add `--all-matches` to set them all.
+
+Jev can also be confidently wrong (rent at an apartment complex that sounds like a resort, filed as Travel), and those stores never reach `spend review`. To catch them, switch **View** in the dashboard's sidebar to **Check categories**: it lists every store Jev placed that you haven't checked, biggest spending first. Pick the right category and **Save**, or click **Looks right**. Either way the choice is yours from then on, for that store's past and future transactions, and the store leaves the list. If Jev keeps filing the wrong stores under one category, make that category's description in `categories.toml` clearer: it's what Jev reads.
 
 ### Purchases you were paid back for
 

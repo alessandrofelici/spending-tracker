@@ -2,6 +2,10 @@
 and money coming in to checking is never spending. Runs the real app offline
 (Streamlit's AppTest) against a throwaway database with made-up rows."""
 
+import base64
+import json
+
+import numpy as np
 import pytest
 import streamlit as st
 from fakes import CHECKING, txn
@@ -108,7 +112,7 @@ def test_dismissing_a_proposal(concert, app):
 
 def test_marking_a_purchase_by_hand(concert, app):
     at = app()
-    at.selectbox[-1].select("concert")
+    at.selectbox(key="paid_back_purchase").select("concert")
     at.number_input[0].set_value(120.0)
     at.text_input[0].input("split in half")
     at.button[-1].click()  # the form's Save
@@ -125,7 +129,7 @@ def test_marking_a_purchase_by_hand(concert, app):
 
 def test_marking_more_than_the_price_is_refused(concert, app):
     at = app()
-    at.selectbox[-1].select("dinner")
+    at.selectbox(key="paid_back_purchase").select("dinner")
     at.number_input[0].set_value(100.0)
     next(b for b in at.button if b.label == "Save").click()
     at.run()
@@ -196,3 +200,187 @@ def test_checking_waits_until_the_card_is_connected(conn, banks, app):
     at = app()
     keys = [b.key for b in at.button]
     assert "sign-in-card" in keys and "sign-in-reimbursements" not in keys
+
+
+# --- Time range (#27) ----------------------------------------------------------
+
+
+@pytest.fixture
+def months(conn):
+    db.insert_transactions(
+        conn,
+        [
+            row("a", "NORTHWIND GROCERY 0042 LANSING MI", 100.0, "2025-11-03"),
+            row("b", "NORTHWIND GROCERY 0042 LANSING MI", 80.0, "2025-12-03"),
+            row("c", "NOODLE HOUSE LANSING MI", 40.0, "2026-01-03"),
+            row("d", "NOODLE HOUSE LANSING MI", 60.0, "2026-02-03"),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+def test_one_month_is_still_the_default(months, app):
+    at = app()
+    assert at.selectbox(key="period").value == "One month"
+    assert at.selectbox(key="month").value == "2026-02"
+    assert metric(at, "Total spent") == "$60.00"
+    assert "Average per month" not in [m.label for m in at.metric]
+
+
+def test_a_year_and_a_custom_range(months, app):
+    at = app()
+    at.selectbox(key="period").select("2025").run()
+    assert metric(at, "Total spent") == "$180.00"
+    assert "Average per month" in [m.label for m in at.metric]
+    assert len(at.dataframe[-1].value) == 2  # the transactions in 2025
+
+    at.selectbox(key="period").select("Custom range").run()
+    at.selectbox(key="from").select("2025-12")
+    at.selectbox(key="to").select("2026-01").run()
+    assert not at.exception
+    assert metric(at, "Total spent") == "$120.00"
+    # Compared with the two months before: just November's $100.
+    total = next(m for m in at.metric if m.label == "Total spent")
+    assert "+20.00 vs 2025-10 to 2025-11" in total.delta
+
+
+# --- Everyday vs travel and big one-offs (#26) ---------------------------------
+
+
+def chart_total(at: AppTest, key: str) -> float:
+    """Sum of every bar in the monthly chart with this key."""
+    chart = next(c for c in at.get("plotly_chart") if f"monthly-{key}" in c.proto.id)
+    fig = json.loads(chart.proto.spec)
+    total = 0.0
+    for trace in fig["data"]:
+        y = trace["y"]
+        if isinstance(y, dict):  # Plotly's binary encoding
+            y = np.frombuffer(base64.b64decode(y["bdata"]), dtype=y["dtype"])
+        total += float(sum(y))
+    return total
+
+
+def test_everyday_and_one_offs_add_up_to_the_total(conn, app):
+    db.insert_transactions(
+        conn,
+        [
+            row("hotel", "EXAMPLE HOTEL 0042", 90.0, "2026-03-02", "Travel", "manual"),
+            row(
+                "laptop",
+                "EXAMPLE ELECTRONICS",
+                900.0,
+                "2026-03-05",
+                "Shopping",
+                "manual",
+            ),
+            row("food", "NORTHWIND GROCERY 0042 LANSING MI", 60.0, "2026-03-07"),
+        ],
+    )
+    conn.commit()
+    at = app()
+    assert metric(at, "Total spent") == "$1,050.00"
+    assert any("Everyday $60.00" in c.value for c in at.caption)
+    assert [t.label for t in at.tabs] == [
+        "Overall",
+        "Travel & big one-offs",
+        "Everyday",
+    ]
+    assert chart_total(at, "overall") == 1050.0
+    assert chart_total(at, "one-off") == 990.0
+    assert chart_total(at, "everyday") == 60.0
+
+
+# --- Analysis view (#16) -------------------------------------------------------
+
+
+def test_the_analysis_view_runs(months, app):
+    at = app()
+    at.sidebar.radio(key="view").set_value("Analysis").run()
+    assert not at.exception
+    headers = [h.value for h in at.subheader]
+    assert "One category over time" in headers
+    assert "What changed between two months" in headers
+    assert "Total spent" not in [m.label for m in at.metric]  # the spending page is off
+    at.selectbox(key="cmp_before").select("2025-11").run()
+    assert not at.exception
+
+
+# --- Checking Jev's categories (#14) --------------------------------------------
+
+
+@pytest.fixture
+def jev_placed(conn):
+    db.insert_transactions(
+        conn,
+        [
+            row(
+                "rent1", "MAPLE RESORT APARTMENTS", 900.0, "2026-03-01", "Travel", "llm"
+            ),
+            row(
+                "rent2", "MAPLE RESORT APARTMENTS", 900.0, "2026-04-01", "Travel", "llm"
+            ),
+            row(
+                "cafe",
+                "BLUE HERON CAFE EAST LANSING MI",
+                6.0,
+                "2026-04-02",
+                "Dining",
+                "llm",
+            ),
+            row(
+                "mine",
+                "PETSMART 1234 LANSING MI",
+                30.0,
+                "2026-04-03",
+                "Shopping",
+                "manual",
+            ),
+            row("unsure", "QUIET PINE BOOKS OKEMOS MI", 12.0, "2026-04-04"),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+def check(app) -> AppTest:
+    at = app()
+    at.sidebar.radio(key="view").set_value("Check categories").run()
+    assert not at.exception
+    return at
+
+
+def test_stores_jev_placed_are_listed_biggest_first(jev_placed, app):
+    at = check(app)
+    keys = [b.key for b in at.button]
+    rent, cafe = (
+        row("x", d)["merchant"]
+        for d in ("MAPLE RESORT APARTMENTS", "BLUE HERON CAFE EAST LANSING MI")
+    )
+    # Only Jev's picks: not the store you set, nor the one waiting in review.
+    assert keys == [f"jev-ok-{rent}", f"jev-ok-{cafe}"]
+
+
+def test_fixing_a_store_sticks_for_all_its_purchases(jev_placed, app):
+    rent = row("x", "MAPLE RESORT APARTMENTS")["merchant"]
+    at = check(app)
+    at.selectbox(key=f"jev-cat-{rent}").select("Bills & Utilities").run()
+    button(at, f"jev-save-{rent}").click().run()
+    assert not at.exception
+    rows = jev_placed.execute(
+        "SELECT DISTINCT category, source FROM transactions WHERE merchant = ?", (rent,)
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [("Bills & Utilities", "manual")]
+    assert db.get_memory(jev_placed)[rent] == "Bills & Utilities"
+    assert f"jev-ok-{rent}" not in [b.key for b in at.button]
+
+
+def test_looks_right_keeps_the_category_and_stops_asking(jev_placed, app):
+    cafe = row("x", "BLUE HERON CAFE EAST LANSING MI")["merchant"]
+    at = check(app)
+    button(at, f"jev-ok-{cafe}").click().run()
+    [r] = jev_placed.execute(
+        "SELECT category, source FROM transactions WHERE merchant = ?", (cafe,)
+    ).fetchall()
+    assert tuple(r) == ("Dining", "manual")
+    assert f"jev-ok-{cafe}" not in [b.key for b in at.button]
