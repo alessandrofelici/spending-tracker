@@ -1,8 +1,10 @@
 """Command line entry point: `uv run spend <command>`."""
 
 import argparse
+import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import httpx
@@ -260,9 +262,63 @@ def cmd_set(args) -> None:
     conn.commit()
 
 
+LOCAL_HOSTS = ("localhost", "127.0.0.1")
+WILDCARD_ADDRESSES = ("0.0.0.0", "::")
+
+
+def dashboard_flags(env: Mapping[str, str]) -> list[str]:
+    """Streamlit flags for DASHBOARD_ADDRESS and DASHBOARD_HOSTS from .env.
+
+    Without them there are none, and .streamlit/config.toml applies: only this
+    machine can connect. DASHBOARD_HOSTS adds to localhost and 127.0.0.1, so an
+    SSH tunnel keeps working, and every other hostname is still refused (DNS
+    rebinding). Exits on settings that would switch that protection off.
+    """
+    flags = []
+    if address := env.get("DASHBOARD_ADDRESS", "").strip():
+        flags.append(f"--server.address={address}")
+    hosts = [h.strip() for h in env.get("DASHBOARD_HOSTS", "").split(",") if h.strip()]
+    if "*" in hosts:
+        sys.exit(
+            "DASHBOARD_HOSTS can't contain *: it would let any web page reach the"
+            " dashboard (DNS rebinding). List the hostnames you open it with."
+        )
+    if hosts:
+        for host in dict.fromkeys([*LOCAL_HOSTS, *hosts]):
+            flags.append(f"--server.allowedHosts={host}")
+    return flags
+
+
+def dashboard_warnings(env: Mapping[str, str]) -> list[str]:
+    """What to tell the user before opening the dashboard beyond this machine."""
+    address = env.get("DASHBOARD_ADDRESS", "").strip()
+    if not address or address in LOCAL_HOSTS:
+        return []
+    notes = [
+        f"The dashboard listens on {address} and has no login: anyone who can"
+        " reach that address can see and change your data."
+    ]
+    if address in WILDCARD_ADDRESSES:
+        notes.append(
+            f"{address} is every network interface. Prefer the VPN interface's own"
+            " address in DASHBOARD_ADDRESS."
+        )
+    if not env.get("DASHBOARD_HOSTS", "").strip():
+        notes.append(
+            "DASHBOARD_HOSTS is empty, so browsers are only let in as localhost or"
+            " 127.0.0.1. Add the hostname or address you open it with."
+        )
+    return notes
+
+
 def cmd_dashboard(args) -> None:
     app = Path(__file__).with_name("dashboard.py")
-    subprocess.run([sys.executable, "-m", "streamlit", "run", str(app)], check=False)
+    flags = dashboard_flags(os.environ)
+    for note in dashboard_warnings(os.environ):
+        print(note, file=sys.stderr)
+    subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", *flags, str(app)], check=False
+    )
 
 
 def cmd_unlink(args) -> None:
