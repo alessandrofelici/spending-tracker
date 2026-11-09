@@ -289,3 +289,18 @@ def test_everyday_and_one_offs_add_up_to_the_total(conn, app):
     assert chart_total(at, "overall") == 1050.0
     assert chart_total(at, "one-off") == 990.0
     assert chart_total(at, "everyday") == 60.0
+
+
+# --- Analysis view (#16) -------------------------------------------------------
+
+
+def test_the_analysis_view_runs(months, app):
+    at = app()
+    at.sidebar.radio(key="view").set_value("Analysis").run()
+    assert not at.exception
+    headers = [h.value for h in at.subheader]
+    assert "One category over time" in headers
+    assert "What changed between two months" in headers
+    assert "Total spent" not in [m.label for m in at.metric]  # the spending page is off
+    at.selectbox(key="cmp_before").select("2025-11").run()
+    assert not at.exception

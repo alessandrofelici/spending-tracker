@@ -38,6 +38,8 @@ The **Period** picker in the sidebar switches from one month (the default) to th
 
 The month-by-month chart has three tabs: **Overall**, **Travel & big one-offs** (the Travel category, plus any purchase that cost you $200 or more) and **Everyday** (everything else, i.e. what a normal month costs). The two add up to the overall total, which is also split under **Total spent**. Change the $200 with `ONE_OFF_MIN` in `.env`.
 
+Switch **View** in the sidebar to **Analysis** to see how spending is changing: this month so far against what past months had spent by the same day, one category month by month (against the month before and its average), what changed between two months, each category's usual month and the months that stood out, and one store over time. Each has a **How it's computed** note with the formula and the numbers behind it. A one-month period looks at the 12 months up to it.
+
 ### Fixing categories
 
 When the dashboard says some transactions need categorizing, or one looks wrong:

@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from spending.analysis_tab import render as render_analysis
 from spending.bank_sync import render as render_bank_sync
 from spending.db import DB_PATH, SPENDING_SQL, connect
 from spending.paid_back import render as render_paid_back
@@ -108,6 +109,10 @@ def monthly_chart(rows: pd.DataFrame, key: str) -> None:
 
 
 period = pick_period(sorted(df.month.unique()))
+view = st.sidebar.radio("View", ["Spending", "Analysis"], key="view")
+if view == "Analysis":
+    render_analysis(df, period)
+    st.stop()
 month = period.label  # how the period is named in headings
 cur = period.rows(df)
 prev = period.previous()
