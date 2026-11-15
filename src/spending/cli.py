@@ -313,7 +313,7 @@ def dashboard_warnings(env: Mapping[str, str]) -> list[str]:
 
 
 def cmd_dashboard(args) -> None:
-    app = Path(__file__).with_name("dashboard.py")
+    app = Path(__file__).with_name("app.py")
     flags = dashboard_flags(os.environ)
     for note in dashboard_warnings(os.environ):
         print(note, file=sys.stderr)

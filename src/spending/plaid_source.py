@@ -176,6 +176,15 @@ class Plaid:
             body["account_filters"] = ACCOUNT_FILTERS[role]
         return self._post("/link/token/create", body)["link_token"]
 
+    def item(self, access_token: str) -> dict:
+        """/item/get: the bank, any error that stops syncing (e.g. sign in
+        again), when consent ends, and when Plaid last reached the bank."""
+        return self._post("/item/get", {"access_token": access_token})
+
+    def accounts(self, access_token: str) -> list[dict]:
+        """/accounts/get: every account shared through this login."""
+        return self._post("/accounts/get", {"access_token": access_token})["accounts"]
+
     def exchange(self, public_token: str) -> tuple[str, str]:
         """Link's one-time public token -> (access_token, item_id)."""
         data = self._post("/item/public_token/exchange", {"public_token": public_token})

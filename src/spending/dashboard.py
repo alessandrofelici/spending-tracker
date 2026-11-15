@@ -1,4 +1,5 @@
-"""Streamlit dashboard: `uv run spend dashboard`."""
+"""The Spending page: the charts. app.py, the dashboard's entry point, lists
+the pages (`uv run spend dashboard`)."""
 
 import pandas as pd
 import plotly.express as px
@@ -17,8 +18,6 @@ PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4
 REST = "Everything else"
 REST_COLOR = "#898781"
 EXCLUDED = {"Payments & Credits"}  # not spending
-
-st.set_page_config(page_title="Spending", layout="wide")
 
 
 @st.cache_data(ttl=30)
