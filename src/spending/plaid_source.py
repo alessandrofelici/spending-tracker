@@ -107,6 +107,7 @@ class SyncResult:
     skipped_accounts: list[str] = field(
         default_factory=list
     )  # other accounts, not stored
+    tracked_accounts: list[str] = field(default_factory=list)  # the ones stored
     status: str = ""  # Plaid's transactions_update_status
 
 
@@ -352,6 +353,7 @@ def sync(
             skipped_accounts=sorted(
                 a["name"] for i, a in changes.accounts.items() if i not in tracked
             ),
+            tracked_accounts=sorted(changes.accounts[i]["name"] for i in tracked),
         )
 
         def wanted(t: dict) -> bool:

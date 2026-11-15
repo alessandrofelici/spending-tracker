@@ -526,3 +526,13 @@ def test_sync_now_syncs_and_checks_again(conn, banks, app):
 def test_connected_accounts_without_bank_sync(app):
     at = settings(app())
     assert any("Bank sync isn't set up" in i.value for i in at.info)
+
+
+def test_the_dashboard_warns_when_the_card_login_tracks_nothing(conn, banks, app):
+    login(conn, "item-card", "card")
+    banks.accounts = [CHECKING]  # a bank with no credit card
+    banks.page()
+    at = app()
+    [warning] = [w.value for w in at.warning if "shares no credit card" in w.value]
+    assert warning.startswith("card bank shares no credit card")
+    assert "Not tracked" not in " ".join(c.value for c in at.caption)

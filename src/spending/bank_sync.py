@@ -21,6 +21,7 @@ import streamlit as st
 
 from spending import db, plaid_source
 from spending.classify import CATEGORIES_PATH, openrouter_key
+from spending.connections import NOT_TRACKING
 from spending.plaid_source import LOGIN_GONE, SIGN_IN_AGAIN, Plaid, PlaidError
 
 # Opens Plaid Link over the page and reports how it ended. Streamlit calls this on
@@ -185,7 +186,9 @@ def _show(
     name = item["institution"] if item and item["institution"] else "your bank"
     if note := st.session_state.pop("signed_in_note", None):
         st.success(note)
-    if bank["state"] == "synced":
+    if bank["state"] == "synced" and _tracks_nothing(bank["result"]):
+        _not_tracking("card", name)
+    elif bank["state"] == "synced":
         st.caption(_summary(name, bank["result"]))
     elif bank["state"] == "error":
         st.warning(
@@ -218,7 +221,9 @@ def _show_checking(
 ) -> None:
     """The checking login, kept small: it's optional."""
     name = item["institution"] if item and item["institution"] else "your checking"
-    if bank["state"] == "synced":
+    if bank["state"] == "synced" and _tracks_nothing(bank["result"]):
+        _not_tracking("reimbursements", name)
+    elif bank["state"] == "synced":
         r = bank["result"]
         if r.status == "NOT_READY":
             st.caption(f"Plaid is still getting {name}'s transactions.")
@@ -244,6 +249,22 @@ def _show_checking(
             if bank.get("message"):
                 st.warning(bank["message"])
             sign_in_button(plaid, "Connect checking", "reimbursements")
+
+
+def _tracks_nothing(r: plaid_source.SyncResult) -> bool:
+    """The login shares accounts, but none this app uses: nothing will come in."""
+    return (
+        r.status != "NOT_READY" and bool(r.skipped_accounts) and not r.tracked_accounts
+    )
+
+
+def _not_tracking(role: str, name: str) -> None:
+    st.warning(NOT_TRACKING[role].format(bank=name))
+    st.page_link(
+        "settings_page.py",
+        label="Open Connected accounts",
+        icon=":material/account_balance:",
+    )
 
 
 def _summary(name: str, r: plaid_source.SyncResult) -> str:
