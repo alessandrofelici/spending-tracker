@@ -249,9 +249,7 @@ def _sign_in_button(
     the existing login."""
     if st.button(label, key=f"sign-in-{role}", type="primary"):
         try:
-            link_token = plaid.link_token(
-                access_token=token, checking_only=role == "reimbursements"
-            )
+            link_token = plaid.link_token(access_token=token, role=role)
         except (PlaidError, httpx.HTTPError) as e:
             st.error(f"Couldn't start the sign-in: {e}")
             return

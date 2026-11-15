@@ -202,6 +202,14 @@ def test_checking_waits_until_the_card_is_connected(conn, banks, app):
     assert "sign-in-card" in keys and "sign-in-reimbursements" not in keys
 
 
+def test_connecting_the_card_offers_only_credit_accounts(conn, banks, app):
+    at = app()
+    button(at, "sign-in-card").click().run()
+    [body] = banks.bodies("/link/token/create")
+    assert body["account_filters"] == plaid_source.ACCOUNT_FILTERS["card"]
+    assert "credit" in body["account_filters"]
+
+
 # --- Time range (#27) ----------------------------------------------------------
 
 

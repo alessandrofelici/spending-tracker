@@ -60,6 +60,15 @@ DAYS_REQUESTED = 730
 SIGN_IN_AGAIN = {"ITEM_LOGIN_REQUIRED", "PASSWORD_RESET_REQUIRED", "ACCESS_NOT_GRANTED"}
 # The bank login no longer exists at Plaid; only a new one helps.
 LOGIN_GONE = {"ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"}
+# What Plaid Link offers to share for each login role: the accounts sync keeps
+# (tracks()). The card login can't be given a bank with no credit card that way.
+ACCOUNT_FILTERS = {
+    "card": {
+        "credit": {"account_subtypes": ["all"]},
+        "loan": {"account_subtypes": ["line of credit"]},
+    },
+    "reimbursements": {"depository": {"account_subtypes": ["checking"]}},
+}
 # MSUFCU's descriptions through Plaid wrap what the CSV export shows:
 #   Credit Card Advance <merchant> Date MM/DD/YY <reference> <nnnn> Card #<last 4>
 # Removing the wrapper makes them match the CSV, so remembered merchants and your
@@ -147,13 +156,11 @@ class Plaid:
             )
         return data
 
-    def link_token(
-        self, access_token: str | None = None, checking_only: bool = False
-    ) -> str:
+    def link_token(self, access_token: str | None = None, role: str = "card") -> str:
         """A token that opens Plaid Link: to add a bank login, or with
         access_token, to sign in to an existing one again (update mode).
-        checking_only offers only checking accounts to share (the login that
-        spots paid-back purchases)."""
+        A new login is offered only the accounts its role uses: credit for the
+        card, checking for the login that spots paid-back purchases."""
         body: dict = {
             "client_name": "Spending Tracker",
             "language": "en",
@@ -166,10 +173,7 @@ class Plaid:
         else:
             body["products"] = ["transactions"]
             body["transactions"] = {"days_requested": DAYS_REQUESTED}
-            if checking_only:
-                body["account_filters"] = {
-                    "depository": {"account_subtypes": ["checking"]}
-                }
+            body["account_filters"] = ACCOUNT_FILTERS[role]
         return self._post("/link/token/create", body)["link_token"]
 
     def exchange(self, public_token: str) -> tuple[str, str]:
@@ -333,8 +337,7 @@ def sync(
         ).fetchone()
         changes = plaid.changes(access_token, item["cursor"])
         checking = item["role"] == "reimbursements"
-        keep = _is_checking if checking else _is_credit
-        tracked = {i for i, a in changes.accounts.items() if keep(a)}
+        tracked = {i for i, a in changes.accounts.items() if tracks(item["role"], a)}
         result = SyncResult(
             status=changes.status,
             skipped_accounts=sorted(
@@ -378,6 +381,11 @@ def sync(
         db.save_plaid_cursor(conn, item_id, changes.cursor)
         conn.commit()
         return result
+
+
+def tracks(role: str, account: dict) -> bool:
+    """Whether a login of this role stores this account's transactions."""
+    return _is_checking(account) if role == "reimbursements" else _is_credit(account)
 
 
 def _is_credit(account: dict) -> bool:

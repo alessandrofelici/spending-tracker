@@ -1,6 +1,7 @@
 """Signing in to your bank and disconnecting it, and how the Plaid client talks to
 Plaid. Plaid is faked (tests/fakes.py), so nothing here reaches a real bank."""
 
+import fakes
 import httpx
 import pytest
 
@@ -152,6 +153,27 @@ def test_sign_in_for_a_new_login_asks_only_for_transactions(plaid, fake_plaid):
     assert body["transactions"] == {"days_requested": plaid_source.DAYS_REQUESTED}
     assert body["user"] == {"client_user_id": "local-user"}  # nothing personal
     assert "access_token" not in body
+
+
+def test_the_card_login_is_offered_only_credit_accounts(plaid, fake_plaid):
+    """A bank with no credit card can't become the card login: sync would keep
+    none of its accounts, and nothing would say so."""
+    plaid.link_token()
+    plaid.link_token(role="reimbursements")
+    card, checking = fake_plaid.bodies("/link/token/create")
+    assert card["account_filters"] == {
+        "credit": {"account_subtypes": ["all"]},
+        "loan": {"account_subtypes": ["line of credit"]},
+    }
+    assert checking["account_filters"] == {
+        "depository": {"account_subtypes": ["checking"]}
+    }
+    # The filters offer exactly what sync keeps.
+    for account in (fakes.CARD, fakes.CREDIT_LINE):
+        assert plaid_source.tracks("card", account)
+        assert not plaid_source.tracks("reimbursements", account)
+    assert plaid_source.tracks("reimbursements", fakes.CHECKING)
+    assert not plaid_source.tracks("card", fakes.CHECKING)
 
 
 def test_signing_in_again_reuses_the_same_login(plaid, fake_plaid):
