@@ -77,9 +77,24 @@ Importing the same file again adds nothing twice. Once your bank is connected, d
 
 ### Your bank connection
 
+**Connected accounts**, at the top of the dashboard (or `/settings`), shows each bank login: the card, and checking if you connected it. For each one it lists every account the bank shares, with its last digits and whether the app uses it, when the dashboard and Plaid last got transactions, and a status:
+
+| Status | Meaning |
+|---|---|
+| **Working** | Syncing normally. |
+| **Getting transactions** | A new connection: Plaid hasn't finished its first pull yet. |
+| **Sign in soon** | The bank's permission ends within 14 days. |
+| **Can't reach the bank** | Plaid's last try to get transactions from the bank failed. Plaid keeps trying on its own. |
+| **Needs sign-in** | The bank ended the connection. Use **Sign in again**. |
+| **Not tracking anything** | None of the shared accounts is one this login uses, like a card login at a bank where you have no credit card. Use **Switch bank**. |
+| **Connect again** | Plaid no longer has this login, or its token is missing here. |
+| **Couldn't check** | Plaid couldn't be reached just now. |
+
+The dashboard also warns you when a login shares nothing it uses. **Sync now** syncs every login again. Plaid itself gets new transactions from your bank a few times a day, so this fetches whatever Plaid has by then.
+
 Now and then your bank ends the connection. The dashboard then shows a **Sign in again** button: use it rather than connecting from scratch, since on Plaid's Trial plan every new connection uses up one of 10 for good.
 
-To disconnect:
+To use another bank for the card or for checking, use **Switch bank** on Connected accounts. The old login is disconnected once the new one is connected, and closing Plaid without finishing changes nothing. **Disconnect** there disconnects just that login. To disconnect every bank at once:
 
 ```bash
 uv run spend unlink
@@ -178,6 +193,7 @@ DASHBOARD_HOSTS=myserver.example.ts.net,100.64.0.5  # what you type in the brows
 | `Couldn't start the sign-in` | Wrong keys, or `PLAID_ENV` doesn't match the secret. |
 | `Plaid is still getting your transactions` | A new connection's first sync isn't ready yet. Open the dashboard again in a few minutes. |
 | Your bank `needs you to sign in again` | Click **Sign in again**. |
+| No new card transactions, though you've used the card | Open **Connected accounts**: is the card login **Working**, and is your card marked as used? If not, **Switch bank** to the bank that issues the card. |
 | No **Connect checking** panel | It appears once your card is connected. |
 | A transfer is proposed for the wrong purchase | Click **Not this purchase**; if it isn't a payback at all, **Not a payback**. |
 | Many transactions left as `Other` | Check `OPENROUTER_KEY` in `.env`, make the `[descriptions]` in `categories.toml` clearer, or add a category with `+` in `spend review`. |
