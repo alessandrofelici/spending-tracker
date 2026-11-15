@@ -8,7 +8,7 @@ import json
 import numpy as np
 import pytest
 import streamlit as st
-from fakes import CHECKING, txn
+from fakes import CARD, CHECKING, txn
 from streamlit.testing.v1 import AppTest
 from test_reimbursements import checking
 from test_storage import row
@@ -16,7 +16,7 @@ from test_storage import row
 from spending import db, plaid_source
 from spending.plaid_source import Plaid
 
-APP = str(db.ROOT / "src" / "spending" / "dashboard.py")
+APP = str(db.ROOT / "src" / "spending" / "app.py")
 
 
 @pytest.fixture
@@ -202,6 +202,14 @@ def test_checking_waits_until_the_card_is_connected(conn, banks, app):
     assert "sign-in-card" in keys and "sign-in-reimbursements" not in keys
 
 
+def test_connecting_the_card_offers_only_credit_accounts(conn, banks, app):
+    at = app()
+    button(at, "sign-in-card").click().run()
+    [body] = banks.bodies("/link/token/create")
+    assert body["account_filters"] == plaid_source.ACCOUNT_FILTERS["card"]
+    assert "credit" in body["account_filters"]
+
+
 # --- Time range (#27) ----------------------------------------------------------
 
 
@@ -384,3 +392,147 @@ def test_looks_right_keeps_the_category_and_stops_asking(jev_placed, app):
     ).fetchall()
     assert tuple(r) == ("Dining", "manual")
     assert f"jev-ok-{cafe}" not in [b.key for b in at.button]
+
+
+# --- Connected accounts page (#33) -----------------------------------------------
+
+
+def settings(at: AppTest) -> AppTest:
+    at.switch_page("settings_page.py").run()
+    assert not at.exception, at.exception
+    return at
+
+
+def texts(at: AppTest) -> str:
+    """Everything the page says, to search."""
+    parts = [
+        e.value
+        for kind in ("markdown", "caption", "error", "warning")
+        for e in getattr(at, kind)
+    ]
+    parts += [d.value.to_string() for d in at.dataframe]
+    return "\n".join(parts)
+
+
+@pytest.fixture
+def both_logins(conn, banks):
+    """A card login and a checking login, synced when the app opened."""
+    login(conn, "item-card", "card")
+    login(conn, "item-chk", "reimbursements")
+    banks.accounts = [CARD, CHECKING]
+    banks.page()
+    banks.page()
+    return banks
+
+
+def test_connected_accounts_shows_each_login_and_what_it_shares(both_logins, app):
+    at = settings(app())
+    page = texts(at)
+    assert "#### Credit card · Example Credit Union" in page
+    assert "#### Checking · Example Credit Union" in page
+    card, checking = (d.value for d in at.dataframe)
+    assert list(card["Number"]) == ["••1234", "••9012"]
+    assert list(card["Used for"]) == [
+        "Card spending",
+        "Nothing: only credit accounts count as spending",
+    ]
+    assert list(checking["Used for"]) == [
+        "Nothing: only checking is used",
+        "Money in, to spot paid-back purchases",
+    ]
+    assert page.count("Working") == 2
+    assert "Synced just now: 0 new, 0 updated, 0 removed" in page
+    assert "access-" not in page  # tokens never reach the page
+    # Checked once per visit, not on every rerun.
+    at.run()
+    assert len(both_logins.bodies("/item/get")) == 2
+
+
+def test_opening_connected_accounts_first_still_syncs(conn, banks, app):
+    login(conn, "item-card", "card")
+    banks.page(added=[txn("t1", "2026-03-10", "TICKETS 1234 LANSING MI", 240.0)])
+    st.cache_data.clear()
+    # AppTest always opens the default page, so run the settings page by itself.
+    at = AppTest.from_file(
+        APP.replace("app.py", "settings_page.py"), default_timeout=60
+    )
+    at.run()
+    assert not at.exception, at.exception
+    assert len(banks.bodies("/transactions/sync")) == 1
+    assert "Synced just now: 1 new" in texts(at)
+    assert "Newest credit transaction saved: 2026-03-10" in texts(at)
+    assert "sign-in-reimbursements" in [b.key for b in at.button]  # not connected
+
+
+def test_a_card_login_with_no_credit_card_says_so(conn, banks, app):
+    login(conn, "item-card", "card")
+    banks.accounts = [CHECKING]
+    banks.page()
+    at = settings(app())
+    assert "Not tracking anything" in texts(at)
+    assert any("shares no credit card" in e.value for e in at.error)
+    button(at, "switch-card").click().run()
+    [body] = banks.bodies("/link/token/create")
+    assert body["account_filters"] == plaid_source.ACCOUNT_FILTERS["card"]
+    assert at.session_state.link_attempt["role"] == "card"
+    assert at.session_state.link_attempt["update"] is False  # a new login
+
+
+def test_a_login_that_needs_a_sign_in_offers_one(conn, banks, app):
+    login(conn, "item-card", "card")
+    banks.page()
+    banks.item_error = {
+        "error_code": "ITEM_LOGIN_REQUIRED",
+        "error_message": "the login details of this item have changed",
+        "display_message": None,
+    }
+    at = settings(app())
+    assert "Needs sign-in" in texts(at)
+    button(at, "again-card").click().run()
+    [body] = banks.bodies("/link/token/create")
+    assert body["access_token"] == "access-item-card"  # the same login
+    assert at.session_state.link_attempt["update"] is True
+
+
+def test_disconnecting_one_login_keeps_the_other(conn, both_logins, app):
+    at = settings(app())
+    button(at, "unlink-card").click().run()
+    assert any("Disconnect Example Credit Union?" in w.value for w in at.warning)
+    button(at, "unlink-no-card").click().run()  # Cancel
+    assert both_logins.removed == []
+
+    button(at, "unlink-card").click().run()
+    button(at, "unlink-yes-card").click().run()
+    assert not at.exception
+    assert both_logins.removed == ["access-item-card"]
+    assert [i["item_id"] for i in db.get_plaid_items(conn)] == ["item-chk"]
+    assert plaid_source.load_token("item-chk") == "access-item-chk"
+    assert any("Disconnected Example Credit Union" in s.value for s in at.success)
+    assert "sign-in-card" in [b.key for b in at.button]  # connect a card again
+
+
+def test_sync_now_syncs_and_checks_again(conn, banks, app):
+    login(conn, "item-card", "card")
+    banks.page()
+    at = settings(app())
+    banks.page(added=[txn("t1", "2026-03-10", "TICKETS 1234 LANSING MI", 240.0)])
+    button(at, "sync-now").click().run()
+    assert not at.exception
+    assert len(banks.bodies("/transactions/sync")) == 2
+    assert len(banks.bodies("/item/get")) == 2
+    assert "Synced just now: 1 new" in texts(at)
+
+
+def test_connected_accounts_without_bank_sync(app):
+    at = settings(app())
+    assert any("Bank sync isn't set up" in i.value for i in at.info)
+
+
+def test_the_dashboard_warns_when_the_card_login_tracks_nothing(conn, banks, app):
+    login(conn, "item-card", "card")
+    banks.accounts = [CHECKING]  # a bank with no credit card
+    banks.page()
+    at = app()
+    [warning] = [w.value for w in at.warning if "shares no credit card" in w.value]
+    assert warning.startswith("card bank shares no credit card")
+    assert "Not tracked" not in " ".join(c.value for c in at.caption)

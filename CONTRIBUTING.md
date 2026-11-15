@@ -22,7 +22,7 @@ Run the tests before and after any big change, especially to storage, bank sync 
 uv run pytest
 ```
 
-They check that your data stays safe (the database and token file are private, tokens never reach the database, only redacted new merchants reach Jev, only keys and the token reach Plaid, bank data is git-ignored and blocked by the commit hook, the dashboard only listens on this machine, money into checking never reaches Jev), that imports never duplicate or overwrite your choices, that bank sync handles new, changed, removed and pending transactions, paging and errors, and that paid-back purchases are matched, capped and counted correctly. `tests/test_dashboard.py` runs the real dashboard offline through Streamlit's AppTest.
+They check that your data stays safe (the database and token file are private, tokens never reach the database, only redacted new merchants reach Jev, only keys and the token reach Plaid, bank data is git-ignored and blocked by the commit hook, the dashboard only listens on this machine, money into checking never reaches Jev), that imports never duplicate or overwrite your choices, that bank sync handles new, changed, removed and pending transactions, paging and errors, that each bank login's status (working, needs sign-in, sharing nothing the app uses, ...) is reported correctly, and that paid-back purchases are matched, capped and counted correctly. `tests/test_dashboard.py` runs the real dashboard offline through Streamlit's AppTest.
 
 They run offline in a few seconds and never touch your data: each test gets its own throwaway database, the example categories, no API keys, and a fake Plaid (`tests/fakes.py`) with made-up transactions. Any real network request fails the test.
 
@@ -53,7 +53,10 @@ Paths marked "git-ignored" belong to each user and are never committed.
 │   ├── db.py                   SQLite schema, migrations, queries
 │   ├── plaid_source.py         Plaid client, /transactions/sync, token storage
 │   ├── bank_sync.py            the dashboard's sync on open and sign-in cards (card + checking)
-│   ├── dashboard.py            Streamlit app: the spending charts
+│   ├── app.py                  the dashboard's entry point: its pages
+│   ├── dashboard.py            the Spending page: the charts
+│   ├── settings_page.py        the Connected accounts page (/settings): each bank login
+│   ├── connections.py          whether a bank login works, from Plaid's /item/get and /accounts/get
 │   ├── paid_back.py            the dashboard's "Paid back" section: confirm, mark, undo
 │   ├── reimburse.py            matches money into checking to the purchases it paid back
 │   └── jev_eval.py             `python -m spending.jev_eval`: Jev vs the example keyword rules
@@ -101,9 +104,9 @@ flowchart TB
         D2["parser.py"]
         D3["classify.py<br/>+ pipeline.py"]
         D4["db.py"]
-        D5["dashboard.py"]
+        D5["app.py<br/>dashboard.py<br/>settings_page.py"]
         D6["jev_eval.py"]
-        D7["bank_sync.py<br/>+ plaid_source.py"]
+        D7["bank_sync.py<br/>+ connections.py<br/>+ plaid_source.py"]
         D8["paid_back.py<br/>+ reimburse.py"]
     end
 
@@ -134,7 +137,10 @@ flowchart LR
     parser["parser.py<br/>CSV → Transaction"]
     classify["classify.py<br/>manual → payments → memory → Jev"]
     db["db.py<br/>SQLite schema + queries"]
+    app["app.py<br/>pages"]
     dash["dashboard.py<br/>Streamlit + Plotly"]
+    settings["settings_page.py<br/>Connected accounts"]
+    conns["connections.py<br/>is each login working?"]
     jeval["jev_eval.py<br/>Jev vs example keyword rules"]
     pipeline["pipeline.py<br/>categorize → store"]
     banksync["bank_sync.py<br/>sync on open, sign-in"]
@@ -151,13 +157,19 @@ flowchart LR
     cli --> classify
     cli --> db
     cli -. "spend unlink" .-> plaidsrc
-    cli -. "spend dashboard" .-> dash
+    cli -. "spend dashboard" .-> app
+    app --> dash
+    app --> settings
     pipeline --> classify
     pipeline --> db
     classify --> toml
     classify --> llm
     classify --> db
     dash --> banksync
+    settings --> banksync
+    settings --> conns
+    settings --> db
+    conns --> plaidsrc
     dash --> db
     dash --> paidback
     paidback --> reimb

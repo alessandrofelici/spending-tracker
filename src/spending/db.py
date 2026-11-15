@@ -240,6 +240,13 @@ def get_plaid_items(
     ).fetchall()
 
 
+def newest_date(conn: sqlite3.Connection, account: str) -> str | None:
+    """The date of the newest stored transaction of an account (credit or checking)."""
+    return conn.execute(
+        "SELECT MAX(date) FROM transactions WHERE account = ?", (account,)
+    ).fetchone()[0]
+
+
 def add_plaid_item(
     conn: sqlite3.Connection,
     item_id: str,

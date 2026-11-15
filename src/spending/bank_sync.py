@@ -21,6 +21,7 @@ import streamlit as st
 
 from spending import db, plaid_source
 from spending.classify import CATEGORIES_PATH, openrouter_key
+from spending.connections import NOT_TRACKING
 from spending.plaid_source import LOGIN_GONE, SIGN_IN_AGAIN, Plaid, PlaidError
 
 # Opens Plaid Link over the page and reports how it ended. Streamlit calls this on
@@ -63,6 +64,20 @@ def render() -> str:
     """Sync once per browser session, i.e. each time the app opens, and show how
     it went. Returns "off" when bank sync isn't set up (no Plaid keys), otherwise
     the state: synced | sign_in | sign_in_again | error."""
+    plaid = client()
+    if isinstance(plaid, str):
+        return plaid
+    logins = sync_logins(plaid)
+    bank = state("card")
+    _show(plaid, *logins["card"], bank)
+    if bank["state"] != "sign_in":  # the card comes first
+        _show_checking(plaid, *logins["reimbursements"], state("reimbursements"))
+    return bank["state"]
+
+
+def client() -> Plaid | str:
+    """The Plaid client, or why bank sync can't run: "off" when it isn't set up
+    (no Plaid keys), "error" when there's a problem, shown here."""
     try:
         plaid = Plaid.from_env()
     except ValueError as e:  # a PLAID_ENV typo
@@ -76,7 +91,13 @@ def render() -> str:
             " categorized. Copy categories.example.toml to categories.toml (see README)."
         )
         return "error"
+    return plaid
 
+
+def sync_logins(plaid: Plaid) -> dict[str, tuple[sqlite3.Row | None, str | None]]:
+    """Each role's login and its token. Syncs each login once per browser session
+    (whichever page opens first), and again after a sign-in or sync_again().
+    Also finishes a sign-in that's under way."""
     logins = {}
     with db.connect() as conn:
         for role in ROLES:
@@ -94,13 +115,19 @@ def render() -> str:
                     st.session_state.pop(f"just_linked_{role}", False),
                 )
         _finish_sign_in(conn, plaid)
-    bank = st.session_state.bank
-    _show(plaid, *logins["card"], bank)
-    if bank["state"] != "sign_in":  # the card comes first
-        _show_checking(
-            plaid, *logins["reimbursements"], st.session_state[_key(ROLES[1])]
-        )
-    return bank["state"]
+    return logins
+
+
+def state(role: str) -> dict:
+    """How this session's sync of the role's login went: {"state": synced |
+    sign_in | sign_in_again | error, plus "result" or "message"}."""
+    return st.session_state[_key(role)]
+
+
+def sync_again(role: str | None = None) -> None:
+    """Sync a login (or every login) again on the next run."""
+    for r in [role] if role else ROLES:
+        st.session_state.pop(_key(r), None)
 
 
 def _revoke_leftovers(
@@ -159,7 +186,9 @@ def _show(
     name = item["institution"] if item and item["institution"] else "your bank"
     if note := st.session_state.pop("signed_in_note", None):
         st.success(note)
-    if bank["state"] == "synced":
+    if bank["state"] == "synced" and _tracks_nothing(bank["result"]):
+        _not_tracking("card", name)
+    elif bank["state"] == "synced":
         st.caption(_summary(name, bank["result"]))
     elif bank["state"] == "error":
         st.warning(
@@ -168,7 +197,7 @@ def _show(
         )
     elif bank["state"] == "sign_in_again":
         st.warning(f"{name} needs you to sign in again. {bank['message']}")
-        _sign_in_button(plaid, "Sign in again", "card", token)
+        sign_in_button(plaid, "Sign in again", "card", token)
     else:
         with st.container(border=True):
             st.markdown("#### Connect your bank")
@@ -179,7 +208,7 @@ def _show(
             )
             if bank.get("message"):
                 st.warning(bank["message"])
-            _sign_in_button(plaid, "Sign in to your bank", "card")
+            sign_in_button(plaid, "Sign in to your bank", "card")
             if plaid.env == "sandbox":
                 st.caption(
                     "Plaid sandbox (test banks only): sign in with"
@@ -192,7 +221,9 @@ def _show_checking(
 ) -> None:
     """The checking login, kept small: it's optional."""
     name = item["institution"] if item and item["institution"] else "your checking"
-    if bank["state"] == "synced":
+    if bank["state"] == "synced" and _tracks_nothing(bank["result"]):
+        _not_tracking("reimbursements", name)
+    elif bank["state"] == "synced":
         r = bank["result"]
         if r.status == "NOT_READY":
             st.caption(f"Plaid is still getting {name}'s transactions.")
@@ -205,7 +236,7 @@ def _show_checking(
         st.warning(f"Couldn't get transfers from {name}: {bank['message']}")
     elif bank["state"] == "sign_in_again":
         st.warning(f"{name} needs you to sign in again. {bank['message']}")
-        _sign_in_button(plaid, "Sign in to checking again", "reimbursements", token)
+        sign_in_button(plaid, "Sign in to checking again", "reimbursements", token)
     else:
         with st.expander("Connect checking to spot purchases you were paid back for"):
             st.write(
@@ -217,7 +248,23 @@ def _show_checking(
             )
             if bank.get("message"):
                 st.warning(bank["message"])
-            _sign_in_button(plaid, "Connect checking", "reimbursements")
+            sign_in_button(plaid, "Connect checking", "reimbursements")
+
+
+def _tracks_nothing(r: plaid_source.SyncResult) -> bool:
+    """The login shares accounts, but none this app uses: nothing will come in."""
+    return (
+        r.status != "NOT_READY" and bool(r.skipped_accounts) and not r.tracked_accounts
+    )
+
+
+def _not_tracking(role: str, name: str) -> None:
+    st.warning(NOT_TRACKING[role].format(bank=name))
+    st.page_link(
+        "settings_page.py",
+        label="Open Connected accounts",
+        icon=":material/account_balance:",
+    )
 
 
 def _summary(name: str, r: plaid_source.SyncResult) -> str:
@@ -242,16 +289,25 @@ def _summary(name: str, r: plaid_source.SyncResult) -> str:
     return text
 
 
-def _sign_in_button(
-    plaid: Plaid, label: str, role: str, token: str | None = None
+def sign_in_button(
+    plaid: Plaid,
+    label: str,
+    role: str,
+    token: str | None = None,
+    key: str | None = None,
+    primary: bool = True,
+    help: str | None = None,
 ) -> None:
-    """Opens Plaid Link for a login of this role; with token, in update mode for
-    the existing login."""
-    if st.button(label, key=f"sign-in-{role}", type="primary"):
+    """Opens Plaid Link for a new login of this role, which replaces the current
+    one once it's connected; with token, in update mode for the existing login."""
+    if st.button(
+        label,
+        key=key or f"sign-in-{role}",
+        type="primary" if primary else "secondary",
+        help=help,
+    ):
         try:
-            link_token = plaid.link_token(
-                access_token=token, checking_only=role == "reimbursements"
-            )
+            link_token = plaid.link_token(access_token=token, role=role)
         except (PlaidError, httpx.HTTPError) as e:
             st.error(f"Couldn't start the sign-in: {e}")
             return

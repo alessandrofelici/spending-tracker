@@ -15,18 +15,28 @@ CARD = {
     "name": "Example Visa",
     "type": "credit",
     "subtype": "credit card",
+    "mask": "1234",
 }
 CREDIT_LINE = {  # how some credit unions report the card
     "account_id": "acct-line",
     "name": "Example Credit Line",
     "type": "loan",
     "subtype": "line of credit",
+    "mask": "5678",
 }
 CHECKING = {
     "account_id": "acct-checking",
     "name": "Example Checking",
     "type": "depository",
     "subtype": "checking",
+    "mask": "9012",
+}
+SAVINGS = {
+    "account_id": "acct-savings",
+    "name": "Example Savings",
+    "type": "depository",
+    "subtype": "savings",
+    "mask": "3456",
 }
 
 ACCESS_TOKEN = "access-sandbox-0000-test"
@@ -70,6 +80,15 @@ class FakePlaid:
         self.requests: list[tuple[str, dict]] = []
         self.queued: dict[str, list[httpx.Response]] = {}
         self.removed: list[str] = []  # access tokens revoked through /item/remove
+        # What /item/get reports: an error that stops syncing (e.g.
+        # {"error_code": "ITEM_LOGIN_REQUIRED", ...}), when Plaid last got data
+        # from the bank, and when the bank's permission ends.
+        self.item_error: dict | None = None
+        self.pulls = {
+            "last_successful_update": "2026-03-14T09:40:00Z",
+            "last_failed_update": None,
+        }
+        self.consent_ends: str | None = None
         self._logins = 0
 
     def client(self) -> Plaid:
@@ -154,4 +173,22 @@ class FakePlaid:
             return httpx.Response(200, json={"request_id": "req"})
         if path == "/link/token/create":
             return httpx.Response(200, json={"link_token": "link-sandbox-test"})
+        if path == "/item/get":
+            return httpx.Response(
+                200,
+                json={
+                    "item": {
+                        "item_id": "item-x",
+                        "institution_id": "ins_0",
+                        "institution_name": "Example Credit Union",
+                        "error": self.item_error,
+                        "consent_expiration_time": self.consent_ends,
+                    },
+                    "status": {"transactions": self.pulls},
+                },
+            )
+        if path == "/accounts/get":
+            if self.item_error:  # Plaid won't list accounts until you sign in
+                return httpx.Response(400, json=self.item_error)
+            return httpx.Response(200, json={"accounts": self.accounts})
         raise AssertionError(f"Unexpected Plaid call: {path}")
