@@ -134,11 +134,65 @@ def test_confirmed_and_dismissed_matches_are_not_proposed_again(card):
     reimburse.not_a_reimbursement(card, "c")  # e.g. a friend repaying a loan
     assert "c" not in [i for i, _, _ in proposed(card)]
 
-    # "Not this purchase": the next best one is proposed instead.
+    # An older "not this purchase": the next best one is proposed instead.
     [(_, purchase, _)] = [p for p in proposed(card) if p[0] == "b"]
     db.dismiss_match(card, purchase, "b")
     [(_, other, _)] = [p for p in proposed(card) if p[0] == "b"]
     assert other != purchase
+
+    # Both kinds of "no" are listed, and can be taken back.
+    assert [
+        (h["id"], h["not_a_payback"], h["turned_down"]) for h in reimburse.hidden(card)
+    ] == [("c", 1, 0), ("b", 0, 1)]
+    reimburse.show_again(card, "c")
+    reimburse.show_again(card, "b")
+    assert reimburse.hidden(card) == []
+    assert {i for i, _, _ in proposed(card)} == {"b", "c"}
+    assert [p for p in proposed(card) if p[0] == "b"] == [("b", purchase, 30.0)]
+
+
+def test_every_purchase_a_payment_fits_is_offered_best_first(card):
+    db.insert_transactions(card, [incoming("b", 30.0, "2026-03-06")])
+    [m] = reimburse.propose(card)
+    # Not an even share of any: the closest in date first (the flight and the
+    # gas are 4 days off, the earlier first), then the dinner (6 days off).
+    assert m.candidates == ("flight", "gas", "dinner")
+    assert m.purchase_id == m.candidates[0]
+
+
+def test_purchases_left_to_pay_back_and_unused_payments(card):
+    db.insert_transactions(
+        card,
+        [
+            row("feb", "PETSMART 1234 LANSING MI", 25.0, "2026-02-03"),
+            incoming("used", 4.5, "2026-03-12"),
+            incoming("free", 21.0, "2026-03-11"),
+            incoming("pay", 900.0, "2026-03-01", "PAYROLL EXAMPLE CO"),
+        ],
+    )
+    db.add_reimbursement(card, "coffee", 4.5, incoming_id="used")
+    db.add_reimbursement(card, "dinner", 50.0)
+    open_ = {p["id"]: p["left"] for p in reimburse.open_purchases(card)}
+    # Any month, newest first; the coffee is paid back in full.
+    assert list(open_) == ["dinner", "gas", "flight", "feb"]
+    assert open_["dinner"] == 46.0
+    assert [p["id"] for p in reimburse.payments(card)] == ["free"]
+
+
+@pytest.mark.parametrize(
+    ("description", "name"),
+    [
+        ("Zelle JORDAN EXAMPLE 1234567890 ZELLE CREDIT", "Jordan Example"),
+        ("ZELLE FROM JANE DOE", "Jane Doe"),
+        ("Zelle payment from Jane Doe", "Jane Doe"),
+        ("ZELLE PAYMENT FROM ALEX SAMPLE ON 03/03 REF #AB12", "Alex Sample"),
+        ("Zelle from Sam Q. O'Example; memo dinner", "Sam Q. O'Example"),
+        ("ONLINE ZELLE CR 1234", None),
+        ("ZELLE 1234567890", None),
+    ],
+)
+def test_who_sent_a_payment(description, name):
+    assert reimburse.sender(description) == name
 
 
 def test_accepting_every_proposal_never_pays_back_too_much(card):

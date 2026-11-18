@@ -97,6 +97,16 @@ def test_undo_and_bank_removals(concert):
     assert db.get_reimbursements(concert) == []
 
 
+def test_undoing_several_pieces_at_once(concert):
+    ids = [
+        db.add_reimbursement(concert, "concert", 80, incoming_id="zelle1"),
+        db.add_reimbursement(concert, "concert", 80),
+        db.add_reimbursement(concert, "coffee", 4.5),
+    ]
+    assert db.remove_reimbursements(concert, ids[:2] + [999]) == 2
+    assert [p["txn_id"] for p in db.get_reimbursements(concert)] == ["coffee"]
+
+
 def test_checking_rows_stay_out_of_categorizing(concert):
     zelle = row("x", "ZELLE FROM FRIEND")["merchant"]
     assert db.find_merchants(concert, "zelle") == []

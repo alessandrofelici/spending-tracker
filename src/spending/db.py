@@ -406,11 +406,20 @@ def remove_reimbursement(conn: sqlite3.Connection, reimbursement_id: int) -> boo
     return cur.rowcount > 0
 
 
+def remove_reimbursements(conn: sqlite3.Connection, ids: list[int]) -> int:
+    """Undo several paid-back pieces at once. Returns how many were removed."""
+    cur = conn.executemany(
+        "DELETE FROM reimbursements WHERE id = ?", [(i,) for i in ids]
+    )
+    return cur.rowcount
+
+
 def get_reimbursements(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Every paid-back piece with its purchase (and transfer, if any), newest purchase first."""
     return conn.execute(
         """SELECT r.id, r.txn_id, r.amount, r.note, r.incoming_id,
-                  t.date, t.description, t.amount AS purchase_amount,
+                  t.date, t.month, t.description, t.merchant, t.category,
+                  t.amount AS purchase_amount,
                   i.date AS incoming_date, i.description AS incoming_description
            FROM reimbursements r
            JOIN transactions t ON t.id = r.txn_id
