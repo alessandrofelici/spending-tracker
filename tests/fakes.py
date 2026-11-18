@@ -55,9 +55,11 @@ def txn(
     account: str = CARD["account_id"],
     pending: bool = False,
     wrap: bool = True,
+    pending_transaction_id: str | None = None,
 ) -> dict:
     """A Plaid transaction, as /transactions/sync returns it. wrap=False for rows
-    MSUFCU doesn't wrap, like card payments."""
+    MSUFCU doesn't wrap, like card payments. A posted transaction names the
+    pending one it replaces in pending_transaction_id."""
     return {
         "transaction_id": tid,
         "account_id": account,
@@ -66,6 +68,7 @@ def txn(
         "name": merchant.title(),
         "amount": amount,
         "pending": pending,
+        "pending_transaction_id": pending_transaction_id,
     }
 
 

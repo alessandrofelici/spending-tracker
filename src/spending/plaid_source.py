@@ -18,6 +18,8 @@ Safety measures:
     rows are never spending and never reach Jev: P2P transfers carry the names
     of private individuals.
   * Pending transactions are skipped: they can still change amount or disappear.
+    Pending money in to checking is only noted as on the way (pending_incoming),
+    never matched or counted.
   * Jev sees what it sees on a CSV import: one redacted description per new
     merchant. The bank's wrapper around the merchant, which includes the date,
     is removed first (WRAPPER_RE).
@@ -30,7 +32,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import keyring
@@ -55,6 +57,9 @@ TOKENS_PATH = db.DB_PATH.with_name("plaid-tokens.json")
 STATEMENT = "Plaid"  # what the statement column says for rows from Plaid
 # The most history Plaid allows; rows up to the cutover date are skipped anyway.
 DAYS_REQUESTED = 730
+# Banks post a payment within days. Pending money in older than this was dropped
+# without Plaid saying so, and isn't shown as on the way any more.
+PENDING_DAYS = 14
 # Fixed by signing in to the bank again. Link's update mode keeps the same bank
 # login, which matters on the Trial plan: removing a login never frees its slot.
 SIGN_IN_AGAIN = {"ITEM_LOGIN_REQUIRED", "PASSWORD_RESET_REQUIRED", "ACCESS_NOT_GRANTED"}
@@ -376,6 +381,8 @@ def sync(
             else:  # not stored yet, e.g. it was skipped while pending
                 new.append(t)
         result.removed = db.delete_plaid_transactions(conn, changes.removed)
+        if checking:
+            _keep_pending(conn, item_id, changes, tracked)
 
         found = [(t["transaction_id"], txn) for t in new if (txn := _transaction(t))]
         if found and checking:
@@ -392,6 +399,37 @@ def sync(
         db.save_plaid_cursor(conn, item_id, changes.cursor)
         conn.commit()
         return result
+
+
+def _keep_pending(
+    conn: sqlite3.Connection, item_id: str, changes: Changes, tracked: set[str]
+) -> None:
+    """Note money coming in to checking that's still pending, so the dashboard
+    can show it as on the way: Plaid reports it only once. It goes again when
+    the bank posts it (the posted one names it in pending_transaction_id) or
+    drops it."""
+    reported = changes.added + changes.modified
+    db.save_pending(
+        conn,
+        item_id,
+        [
+            _fields(t["transaction_id"], txn)
+            for t in reported
+            if t["pending"]
+            and t["account_id"] in tracked
+            and float(t["amount"]) < 0
+            and (txn := _transaction(t))
+        ],
+    )
+    posted = [
+        t["pending_transaction_id"]
+        for t in reported
+        if not t["pending"] and t.get("pending_transaction_id")
+    ]
+    db.drop_pending(conn, changes.removed + posted)
+    db.drop_pending_before(
+        conn, (date.today() - timedelta(days=PENDING_DAYS)).isoformat()
+    )
 
 
 def tracks(role: str, account: dict) -> bool:
