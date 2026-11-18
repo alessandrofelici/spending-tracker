@@ -21,10 +21,14 @@ os.environ["JEV_MIN_CONFIDENCE"] = "0.6"
 import httpx  # noqa: E402
 import keyring  # noqa: E402
 import pytest  # noqa: E402
+import streamlit as st  # noqa: E402
 from fakes import FakePlaid  # noqa: E402
 from keyring.errors import NoKeyringError, PasswordDeleteError  # noqa: E402
+from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from spending import db, plaid_source  # noqa: E402
+
+APP = str(db.ROOT / "src" / "spending" / "app.py")
 
 
 @pytest.fixture(autouse=True)
@@ -83,3 +87,21 @@ def conn(db_path):
 @pytest.fixture
 def fake_plaid() -> FakePlaid:
     return FakePlaid()
+
+
+@pytest.fixture
+def app(monkeypatch, db_path):
+    """Runs the dashboard (AppTest, offline) reading db_path. Plaid keys are
+    blank, so bank sync is off and nothing reaches the network."""
+    monkeypatch.setattr(db, "DB_PATH", db_path)
+    # connect()'s default path was bound when db.py loaded; bank sync relies on it.
+    monkeypatch.setattr(db.connect, "__defaults__", (db_path,))
+
+    def run() -> AppTest:
+        st.cache_data.clear()  # the app caches its query across runs in one process
+        at = AppTest.from_file(APP, default_timeout=60)
+        at.run()
+        assert not at.exception, at.exception
+        return at
+
+    return run
