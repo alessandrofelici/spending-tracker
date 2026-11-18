@@ -2,6 +2,8 @@
 never more than the purchase cost, each checking transfer pays back at most one
 purchase, and checking rows never show up as spending or in review."""
 
+from datetime import date, timedelta
+
 import pytest
 from fakes import ACCESS_TOKEN, CARD, CHECKING, txn
 from test_storage import row
@@ -95,6 +97,16 @@ def test_undo_and_bank_removals(concert):
     assert db.get_reimbursements(concert) == []
 
 
+def test_undoing_several_pieces_at_once(concert):
+    ids = [
+        db.add_reimbursement(concert, "concert", 80, incoming_id="zelle1"),
+        db.add_reimbursement(concert, "concert", 80),
+        db.add_reimbursement(concert, "coffee", 4.5),
+    ]
+    assert db.remove_reimbursements(concert, ids[:2] + [999]) == 2
+    assert [p["txn_id"] for p in db.get_reimbursements(concert)] == ["coffee"]
+
+
 def test_checking_rows_stay_out_of_categorizing(concert):
     zelle = row("x", "ZELLE FROM FRIEND")["merchant"]
     assert db.find_merchants(concert, "zelle") == []
@@ -128,10 +140,22 @@ def test_logins_by_role_and_their_cutovers(concert):
 
 
 def on_checking(
-    tid: str, day: str, description: str, amount: float, pending: bool = False
+    tid: str,
+    day: str,
+    description: str,
+    amount: float,
+    pending: bool = False,
+    replaces: str | None = None,
 ) -> dict:
     return txn(
-        tid, day, description, amount, CHECKING["account_id"], pending, wrap=False
+        tid,
+        day,
+        description,
+        amount,
+        CHECKING["account_id"],
+        pending,
+        wrap=False,
+        pending_transaction_id=replaces,
     )
 
 
@@ -181,3 +205,57 @@ def test_checking_sync_stores_only_money_in_and_never_asks_jev(
         "checking",
     )
     assert list(conn.execute(db.SPENDING_SQL)) == []  # not spending
+
+
+def pending(conn) -> list[tuple[str, float]]:
+    return [(p["id"], p["amount"]) for p in db.get_pending(conn)]
+
+
+def test_pending_money_in_is_on_the_way_until_the_bank_posts_it(conn, fake_plaid):
+    """Plaid reports a pending payment only once, so it's kept to show as on
+    the way, never as a transaction, until the bank posts or drops it."""
+    today = date.today()
+    day, weeks_ago = today.isoformat(), (today - timedelta(days=20)).isoformat()
+    db.add_plaid_item(conn, "item-chk", "Checking bank", "reimbursements")
+    plaid = fake_plaid.client()
+    fake_plaid.page(
+        added=[
+            on_checking("p1", day, "ZELLE FROM FRIEND", -14.0, pending=True),
+            on_checking("p2", day, "ZELLE FROM OTHER FRIEND", -14.0, pending=True),
+            on_checking("rent", day, "RENT PAYMENT", 900.0, pending=True),
+            on_checking("stale", weeks_ago, "ZELLE FROM FRIEND", -5.0, pending=True),
+            txn("card", day, "TICKETS 1234 LANSING MI", -20.0, pending=True),
+        ]
+    )
+    assert plaid_source.sync(conn, plaid, "item-chk", ACCESS_TOKEN).added == 0
+    assert pending(conn) == [("p1", -14.0), ("p2", -14.0)]
+    assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+
+    # Posted: Plaid adds the posted transaction, naming the pending one, and
+    # removes the pending one (here in a later sync, which changes nothing).
+    fake_plaid.page(
+        added=[on_checking("in1", day, "ZELLE FROM FRIEND", -14.0, replaces="p1")]
+    )
+    assert plaid_source.sync(conn, plaid, "item-chk", ACCESS_TOKEN).added == 1
+    assert pending(conn) == [("p2", -14.0)]
+    fake_plaid.page(removed=["p1"])
+    plaid_source.sync(conn, plaid, "item-chk", ACCESS_TOKEN)
+    assert pending(conn) == [("p2", -14.0)]
+
+    # A new login reports what's still pending again, under new ids.
+    db.remove_plaid_item(conn, "item-chk")
+    assert pending(conn) == []
+
+
+def test_pending_money_the_bank_drops_goes(conn, fake_plaid):
+    day = date.today().isoformat()
+    db.add_plaid_item(conn, "item-chk", "Checking bank", "reimbursements")
+    plaid = fake_plaid.client()
+    fake_plaid.page(
+        added=[on_checking("p1", day, "ZELLE FROM FRIEND", -14.0, pending=True)]
+    )
+    fake_plaid.page(removed=["p1"])
+    plaid_source.sync(conn, plaid, "item-chk", ACCESS_TOKEN)
+    assert pending(conn) == [("p1", -14.0)]
+    plaid_source.sync(conn, plaid, "item-chk", ACCESS_TOKEN)
+    assert pending(conn) == []

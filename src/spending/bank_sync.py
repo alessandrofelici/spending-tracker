@@ -228,9 +228,12 @@ def _show_checking(
         if r.status == "NOT_READY":
             st.caption(f"Plaid is still getting {name}'s transactions.")
         else:
+            with db.connect() as conn:
+                coming = len(db.get_pending(conn))
             st.caption(
-                f"Checking ({name}): {r.added} new transfer(s) in, to spot"
-                " purchases you were paid back for."
+                f"Checking ({name}): {r.added} new transfer(s) in"
+                + (f", {coming} still pending at the bank" if coming else "")
+                + ", to spot purchases you were paid back for."
             )
     elif bank["state"] == "error":
         st.warning(f"Couldn't get transfers from {name}: {bank['message']}")

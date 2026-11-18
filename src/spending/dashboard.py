@@ -7,9 +7,9 @@ import streamlit as st
 
 from spending.analysis_tab import render as render_analysis
 from spending.bank_sync import render as render_bank_sync
-from spending.db import DB_PATH, SPENDING_SQL, connect
+from spending.data import load
 from spending.jev_check import render as render_jev_check
-from spending.paid_back import render as render_paid_back
+from spending.paid_back import note as paid_back_note
 from spending.period import Period, custom, presets, summarize
 from spending.split import EVERYDAY, ONE_OFF, kind, one_off_min
 
@@ -17,23 +17,12 @@ from spending.split import EVERYDAY, ONE_OFF, kind, one_off_min
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
 REST = "Everything else"
 REST_COLOR = "#898781"
-EXCLUDED = {"Payments & Credits"}  # not spending
-
-
-@st.cache_data(ttl=30)
-def load() -> pd.DataFrame:
-    """Card rows, each counted for what it cost you: what friends paid back of a
-    purchase comes off (`gross` keeps the full price). Checking isn't spending."""
-    with connect(DB_PATH) as conn:
-        df = pd.read_sql(SPENDING_SQL, conn, parse_dates=["date"])
-    df["gross"] = df.amount
-    df["amount"] = df.gross - df.paid_back
-    return df[~df.category.isin(EXCLUDED)]
 
 
 st.title("Spending")
 # Before load(), so the charts include whatever it just pulled from the bank.
 bank = render_bank_sync()
+paid_back_note()
 
 df = load()
 if df.empty:
@@ -252,8 +241,6 @@ st.dataframe(
     column_config={"spent": st.column_config.NumberColumn(format="$%.2f")},
     width="stretch",
 )
-
-render_paid_back(month, cur)
 
 st.subheader("Transactions")
 picked = st.multiselect("Categories", sorted(cur.category.unique()))

@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS dismissed_matches (
     PRIMARY KEY (txn_id, incoming_id)
 );
 
+-- Money coming in to checking that the bank hasn't posted yet. Plaid reports a
+-- pending transaction only once, so it's kept here to show as on the way; it's
+-- never matched or counted. Sync drops it once the bank posts it or drops it.
+CREATE TABLE IF NOT EXISTS pending_incoming (
+    id          TEXT PRIMARY KEY,   -- Plaid's transaction_id of the pending transaction
+    item_id     TEXT NOT NULL,      -- the checking login it came from
+    date        TEXT NOT NULL,      -- YYYY-MM-DD
+    description TEXT NOT NULL,      -- raw text from the bank
+    amount      REAL NOT NULL       -- negative = money in, like checking rows
+);
+
 -- Remembered merchant -> category decisions (from the LLM or from you),
 -- so each merchant only ever has to be classified once.
 CREATE TABLE IF NOT EXISTS merchant_memory (
@@ -265,7 +276,38 @@ def add_plaid_item(
 
 
 def remove_plaid_item(conn: sqlite3.Connection, item_id: str) -> None:
+    """Forget a bank login. Its transactions stay; what was pending at it goes,
+    since a new login reports anything still pending again, under new ids."""
     conn.execute("DELETE FROM plaid_items WHERE item_id = ?", (item_id,))
+    conn.execute("DELETE FROM pending_incoming WHERE item_id = ?", (item_id,))
+
+
+def save_pending(conn: sqlite3.Connection, item_id: str, rows: list[dict]) -> None:
+    """Money in to checking the bank hasn't posted yet (rows: id, date,
+    description, amount), replacing what an earlier sync said about it."""
+    conn.executemany(
+        """INSERT OR REPLACE INTO pending_incoming (id, item_id, date, description, amount)
+           VALUES (:id, :item_id, :date, :description, :amount)""",
+        [r | {"item_id": item_id} for r in rows],
+    )
+
+
+def drop_pending(conn: sqlite3.Connection, ids: list[str]) -> None:
+    """The bank posted or dropped these pending transactions."""
+    conn.executemany("DELETE FROM pending_incoming WHERE id = ?", [(i,) for i in ids])
+
+
+def drop_pending_before(conn: sqlite3.Connection, day: str) -> None:
+    """Forget pending money dated before day: banks post within days, so the
+    bank must have dropped it without Plaid saying so."""
+    conn.execute("DELETE FROM pending_incoming WHERE date < ?", (day,))
+
+
+def get_pending(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Pending money in to checking, newest first."""
+    return conn.execute(
+        "SELECT * FROM pending_incoming ORDER BY date DESC, id"
+    ).fetchall()
 
 
 def save_plaid_cursor(conn: sqlite3.Connection, item_id: str, cursor: str) -> None:
@@ -364,11 +406,20 @@ def remove_reimbursement(conn: sqlite3.Connection, reimbursement_id: int) -> boo
     return cur.rowcount > 0
 
 
+def remove_reimbursements(conn: sqlite3.Connection, ids: list[int]) -> int:
+    """Undo several paid-back pieces at once. Returns how many were removed."""
+    cur = conn.executemany(
+        "DELETE FROM reimbursements WHERE id = ?", [(i,) for i in ids]
+    )
+    return cur.rowcount
+
+
 def get_reimbursements(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Every paid-back piece with its purchase (and transfer, if any), newest purchase first."""
     return conn.execute(
         """SELECT r.id, r.txn_id, r.amount, r.note, r.incoming_id,
-                  t.date, t.description, t.amount AS purchase_amount,
+                  t.date, t.month, t.description, t.merchant, t.category,
+                  t.amount AS purchase_amount,
                   i.date AS incoming_date, i.description AS incoming_description
            FROM reimbursements r
            JOIN transactions t ON t.id = r.txn_id
